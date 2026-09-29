@@ -17,10 +17,18 @@ import { MOCK_FLOOD_ZONES, CITY_CENTERS } from '../lib/mockData.js'
 import { useTheme } from '../lib/ThemeContext.jsx'
 import { useFloodPolygons } from '../hooks/useFloodPolygons.js'
 
-// ── Tiles ─────────────────────────────────────────────────────────────────────
+// ── Tiles — OpenStreetMap (gratis, tidak butuh API key) ──────────────────────
 const TILES = {
-  dark:  { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',  attribution: '&copy; <a href="https://carto.com/">CARTO</a>' },
-  light: { url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', attribution: '&copy; <a href="https://carto.com/">CARTO</a>' },
+  // Dark mode: OSM dengan filter CSS
+  dark: {
+    url:         'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  },
+  // Light mode: OSM standard
+  light: {
+    url:         'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  },
 }
 
 // ── Mock zone styles (fallback) ───────────────────────────────────────────────

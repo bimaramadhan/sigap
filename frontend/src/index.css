@@ -13,7 +13,20 @@
 .leaflet-top,
 .leaflet-bottom       { z-index: 20 !important; }
 
-/* ── Map container ── */
+/* ── Dark mode — invert + hue-rotate untuk OSM tiles ── */
+.dark .leaflet-tile-pane {
+  filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+}
+
+/* ── Polygon overlay harus di-invert balik supaya warna tetap benar ── */
+.dark .leaflet-overlay-pane svg path {
+  filter: invert(100%) hue-rotate(180deg);
+}
+
+/* ── Light mode — tiles normal ── */
+.light .leaflet-tile-pane {
+  filter: none;
+}
 .sigap-map-container {
   width: 100%;
   height: 100%;

@@ -329,3 +329,90 @@ export const MOCK_FLOOD_ZONES = {
   ],
 }
 
+
+// ── Flood Report Mock Data (v3) ───────────────────────────────────────────────
+
+// Daftar sungai kritis per kota (untuk dropdown form)
+export const MOCK_RIVERS = {
+  semarang: [
+    'Sungai Banjirkanal Barat',
+    'Sungai Banjirkanal Timur',
+    'Sungai Beringin',
+    'Sungai Silandak',
+    'Sungai Plumbon',
+    'Kali Garang',
+  ],
+  bekasi: [
+    'Kali Bekasi',
+    'Kali Cikeas',
+    'Kali Cileungsi',
+    'Kali Sunter',
+    'Saluran Tarum Barat',
+  ],
+  jakarta: [
+    'Kali Ciliwung',
+    'Kali Pesanggrahan',
+    'Kali Angke',
+    'Kali Sunter',
+    'Banjir Kanal Barat',
+    'Banjir Kanal Timur',
+    'Kali Krukut',
+  ],
+}
+
+// Laporan lapangan default kosong — user yang mengisi saat demo
+export const MOCK_FLOOD_REPORTS = {
+  semarang: { city: 'semarang', report_count: 0, latest_boost: 0, boost_reason: '', reports: [] },
+  bekasi:   { city: 'bekasi',   report_count: 0, latest_boost: 0, boost_reason: '', reports: [] },
+  jakarta:  { city: 'jakarta',  report_count: 0, latest_boost: 0, boost_reason: '', reports: [] },
+}
+
+// In-memory mock store untuk simulasi submit tanpa backend
+let _mockReportStore = {
+  semarang: [],
+  bekasi:   [],
+  jakarta:  [],
+}
+
+export function getMockReports(city) {
+  return _mockReportStore[city] ?? []
+}
+
+export function addMockReport(data) {
+  const city   = data.city?.toLowerCase() ?? 'semarang'
+  const levels = { normal: 0, waspada: 8, siaga: 15, awas: 25 }
+  const riverBoost = levels[data.river_level] ?? 0
+  const areaBoost  = Math.min((data.flooded_areas?.length ?? 0) * 3, 15)
+  const boost      = riverBoost + areaBoost
+
+  const LABELS = { normal: '🟢 Normal', waspada: '🟡 Waspada', siaga: '🟠 Siaga', awas: '🔴 Awas' }
+
+  const report = {
+    id:                `${city}_${Date.now()}`,
+    city,
+    reported_at:       new Date().toISOString(),
+    reporter:          data.reporter || 'Koordinator BPBD',
+    river_name:        data.river_name,
+    water_level_cm:    data.water_level_cm,
+    river_level:       data.river_level,
+    river_level_label: LABELS[data.river_level] ?? '🟢 Normal',
+    flooded_areas:     data.flooded_areas ?? [],
+    notes:             data.notes ?? '',
+    boost_score:       boost,
+    boost_breakdown: {
+      total:       boost,
+      river_boost: riverBoost,
+      area_boost:  areaBoost,
+      reason:      `TMA ${data.river_level?.toUpperCase()} (+${riverBoost}) + ${data.flooded_areas?.length ?? 0} area (+${areaBoost})`,
+    },
+  }
+
+  if (!_mockReportStore[city]) _mockReportStore[city] = []
+  _mockReportStore[city].unshift(report)
+  _mockReportStore[city] = _mockReportStore[city].slice(0, 20)
+  return report
+}
+
+export function clearMockReports(city) {
+  _mockReportStore[city] = []
+}

@@ -7,11 +7,15 @@ Endpoints:
   GET  /                          Health check
   GET  /cities                    List kota yang didukung
   GET  /alerts                    BMKG alerts aktif (flood-relevant)
-  GET  /weather/{city}            Prakiraan cuaca + rainfall 12 jam [BARU]
+  GET  /weather/{city}            Prakiraan cuaca + rainfall 12 jam
   GET  /features/{city}           Raw EE geospatial features
-  GET  /vulnerability/{city}      Vulnerability score + weather boost
+  GET  /vulnerability/{city}      Vulnerability score + semua boost
   GET  /narasi/{city}             Narasi bahasa Indonesia
-  GET  /analyze/{city}            Full pipeline: alert + weather + score + narasi
+  GET  /analyze/{city}            Full pipeline
+  POST /flood-report              Submit laporan lapangan dari BPBD [BARU]
+  GET  /flood-reports/{city}      Ambil laporan lapangan terbaru [BARU]
+  GET  /flood-rivers/{city}       Daftar sungai kritis per kota [BARU]
+  DELETE /flood-reports/{city}    Hapus semua laporan (reset demo) [BARU]
 
 Jalankan:
   uvicorn api.main:app --reload --port 8080
@@ -32,7 +36,7 @@ load_dotenv()
 app = FastAPI(
     title       = "SIGAP API",
     description = "Sistem Integrasi Geospasial Aksi Penanggulangan Bencana",
-    version     = "0.2.0",
+    version     = "0.3.0",
     docs_url    = "/docs",
     redoc_url   = "/redoc",
 )
@@ -144,6 +148,47 @@ class FullAnalysisResponse(BaseModel):
     vulnerability:  VulnerabilityResponse
     narasi:         NarasiResponse
     is_sample_data: bool
+
+
+# ── Flood Report Models (BARU) ────────────────────────────────────────────────
+
+class FloodedArea(BaseModel):
+    name:         str            # "RT 04 Kelurahan Semarang Utara"
+    depth_cm:     int            # kedalaman genangan cm
+    est_affected: int = 0        # estimasi jiwa terdampak
+
+
+class FloodReportRequest(BaseModel):
+    city:           str
+    reporter:       str = "Koordinator BPBD"
+    river_name:     str
+    water_level_cm: int
+    river_level:    str          # normal / waspada / siaga / awas
+    flooded_areas:  list[FloodedArea] = []
+    notes:          str = ""
+
+
+class FloodReportResponse(BaseModel):
+    id:                str
+    city:              str
+    reported_at:       str
+    reporter:          str
+    river_name:        str
+    water_level_cm:    int
+    river_level:       str
+    river_level_label: str
+    flooded_areas:     list[dict]
+    notes:             str
+    boost_score:       float
+    boost_breakdown:   dict
+
+
+class FloodReportsListResponse(BaseModel):
+    city:         str
+    report_count: int
+    latest_boost: float
+    boost_reason: str
+    reports:      list[FloodReportResponse]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -316,22 +361,43 @@ def get_vulnerability(
     city:            str,
     with_weather:    bool = Query(True,  description="Sertakan boost dari cuaca BMKG"),
     with_alerts:     bool = Query(True,  description="Sertakan boost dari alert BMKG"),
+    with_field:      bool = Query(True,  description="Sertakan boost dari laporan lapangan BPBD"),
 ):
     """
     Vulnerability score 0-100 dengan breakdown lengkap.
 
-    Score = base (statis) + weather_boost (dinamis) + alert_boost (dinamis)
+    Score = base (statis) + weather_boost + alert_boost + field_report_boost
 
-    Skor akan BERBEDA antara hari cerah dan hari hujan lebat.
+    Skor berubah secara real-time ketika:
+    - Kondisi cuaca berubah (update tiap 60 menit)
+    - Alert BMKG baru masuk (update tiap 30 menit)
+    - Koordinator BPBD submit laporan lapangan (langsung)
     """
     city = _validate_city(city)
     try:
         from engine.vulnerability import calculate_from_cache_or_ee
-        result = calculate_from_cache_or_ee(
+        from engine.flood_report  import get_latest_boost as get_field_boost
+
+        result      = calculate_from_cache_or_ee(
             city,
             include_weather = with_weather,
             include_alerts  = with_alerts,
         )
+
+        # Tambahkan field report boost jika ada laporan baru
+        if with_field:
+            field = get_field_boost(city)
+            if field["boost_score"] > 0:
+                # Inject ke result — cap total boost pada 30
+                extra = min(field["boost_score"], max(0, 30 - result.weather_boost - result.alert_boost))
+                result.score           = round(min(100, result.score + extra), 1)
+                result.priority_actions.insert(0,
+                    f"📡 Laporan lapangan: {field['boost_reason']} (+{extra:.0f} poin)"
+                )
+                # Update kategori
+                from engine.vulnerability import _get_category
+                result.category, result.category_message = _get_category(result.score)
+
         return _vuln_to_response(result)
     except Exception as e:
         logger.error(f"Error calculating vulnerability: {e}")
@@ -441,4 +507,84 @@ def full_analysis(
 
     except Exception as e:
         logger.error(f"Full analysis error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Flood Report Endpoints (BARU) ─────────────────────────────────────────────
+
+@app.post("/flood-report", response_model=FloodReportResponse, tags=["Field Reports"])
+def submit_flood_report(body: FloodReportRequest):
+    """
+    Submit laporan lapangan dari koordinator BPBD.
+
+    Laporan ini langsung mempengaruhi vulnerability score kota.
+    Berdasarkan Pasal 23 Peraturan BNPB No.2/2024 — BPBD wajib
+    memberikan umpan balik kondisi lapangan ke sistem peringatan dini.
+
+    river_level: "normal" | "waspada" | "siaga" | "awas"
+    """
+    city = _validate_city(body.city)
+    try:
+        from engine.flood_report import add_report
+
+        report = add_report(
+            city           = city,
+            reporter       = body.reporter,
+            river_name     = body.river_name,
+            water_level_cm = body.water_level_cm,
+            river_level    = body.river_level,
+            flooded_areas  = [a.dict() for a in body.flooded_areas],
+            notes          = body.notes,
+        )
+        return FloodReportResponse(**report)
+    except Exception as e:
+        logger.error(f"Error submitting flood report: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/flood-reports/{city}", response_model=FloodReportsListResponse, tags=["Field Reports"])
+def get_flood_reports(city: str, limit: int = Query(10, ge=1, le=50)):
+    """
+    Ambil laporan lapangan terbaru untuk satu kota.
+    Hanya laporan dalam 12 jam terakhir yang dihitung untuk boost score.
+    """
+    city = _validate_city(city)
+    try:
+        from engine.flood_report import get_reports, get_latest_boost
+
+        reports = get_reports(city, limit=limit)
+        boost   = get_latest_boost(city)
+
+        return FloodReportsListResponse(
+            city         = city,
+            report_count = len(reports),
+            latest_boost = boost["boost_score"],
+            boost_reason = boost["reason"],
+            reports      = [FloodReportResponse(**r) for r in reports],
+        )
+    except Exception as e:
+        logger.error(f"Error getting flood reports: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/flood-rivers/{city}", tags=["Field Reports"])
+def get_flood_rivers(city: str):
+    """Daftar sungai kritis untuk dropdown input laporan."""
+    city = _validate_city(city)
+    from engine.flood_report import get_rivers
+    return {"city": city, "rivers": get_rivers(city)}
+
+
+@app.delete("/flood-reports/{city}", tags=["Field Reports"])
+def clear_flood_reports(city: str):
+    """
+    Hapus semua laporan lapangan untuk satu kota.
+    Berguna untuk reset demo setelah presentasi.
+    """
+    city = _validate_city(city)
+    try:
+        from engine.flood_report import clear_reports
+        count = clear_reports(city)
+        return {"city": city, "cleared": count, "message": f"Berhasil menghapus {count} laporan"}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

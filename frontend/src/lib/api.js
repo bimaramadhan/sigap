@@ -1,10 +1,10 @@
 /**
- * lib/api.js
- * ──────────
+ * lib/api.js — v3
+ * ─────────────────
  * Semua HTTP calls ke FastAPI backend.
  * Otomatis fallback ke mock data jika backend tidak tersedia.
  *
- * v2: Tambah getWeather()
+ * v3: Tambah flood report functions (submit, get, rivers, clear)
  */
 
 import axios from 'axios'
@@ -14,6 +14,11 @@ import {
   MOCK_WEATHER,
   MOCK_NARASI,
   MOCK_CITIES,
+  MOCK_RIVERS,
+  MOCK_FLOOD_REPORTS,
+  getMockReports,
+  addMockReport,
+  clearMockReports,
 } from './mockData.js'
 
 const BASE_URL = '/api'
@@ -125,5 +130,60 @@ export async function getFullAnalysis(city) {
       },
       is_sample_data: true,
     }
+  }
+}
+
+// ── Flood Report API (v3) ─────────────────────────────────────────────────────
+// getMockReports, addMockReport, clearMockReports, MOCK_RIVERS sudah diimport di atas
+
+export async function getFloodRivers(city) {
+  if (USE_MOCK) {
+    await delay(200)
+    return { city, rivers: MOCK_RIVERS[city] ?? [] }
+  }
+  try { return (await http.get(`/flood-rivers/${city}`)).data }
+  catch { return { city, rivers: MOCK_RIVERS[city] ?? [] } }
+}
+
+export async function getFloodReports(city) {
+  if (USE_MOCK) {
+    await delay(300)
+    const reports = getMockReports(city)
+    const best    = reports.length > 0
+      ? Math.max(...reports.map(r => r.boost_score))
+      : 0
+    const reason  = reports[0]?.boost_breakdown?.reason ?? ''
+    return { city, report_count: reports.length, latest_boost: best, boost_reason: reason, reports }
+  }
+  try { return (await http.get(`/flood-reports/${city}`)).data }
+  catch {
+    const reports = getMockReports(city)
+    return { city, report_count: reports.length, latest_boost: 0, boost_reason: '', reports }
+  }
+}
+
+export async function submitFloodReport(data) {
+  if (USE_MOCK) {
+    await delay(600)
+    return addMockReport(data)
+  }
+  try { return (await http.post('/flood-report', data)).data }
+  catch (e) {
+    // Fallback ke mock jika backend tidak tersedia
+    console.warn('Backend tidak tersedia — simpan ke mock store')
+    return addMockReport(data)
+  }
+}
+
+export async function clearFloodReports(city) {
+  if (USE_MOCK) {
+    await delay(300)
+    clearMockReports(city)
+    return { city, cleared: 0 }
+  }
+  try { return (await http.delete(`/flood-reports/${city}`)).data }
+  catch {
+    clearMockReports(city)
+    return { city, cleared: 0 }
   }
 }

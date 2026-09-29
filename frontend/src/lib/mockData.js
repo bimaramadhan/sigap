@@ -1,4 +1,4 @@
-/**
+﻿/**
  * lib/mockData.js
  * ────────────────
  * Data mock untuk development tanpa backend.
@@ -136,8 +136,8 @@ export const MOCK_VULNERABILITY = {
     city_label:        'Kota Semarang',
     score:             87.4,       // 72.4 base + 15 weather boost
     base_score:        72.4,
-    category:          '🔴 KRITIS',
-    category_message:  'Risiko kritis. Segera mulai tindakan evakuasi.',
+    category:          '🔴 AWAS',
+    category_message:  'Ancaman tinggi, membahayakan masyarakat. Segera lakukan evakuasi.',
     is_sample_data:    true,
     score_breakdown: {
       hazard:     21.8,
@@ -182,8 +182,8 @@ export const MOCK_VULNERABILITY = {
     city_label:        'Kota/Kab Bekasi',
     score:             71.1,       // 68.1 base + 3 weather boost
     base_score:        68.1,
-    category:          '🟠 TINGGI',
-    category_message:  'Risiko tinggi. Aktifkan kesiapsiagaan dini.',
+    category:          '🟠 SIAGA',
+    category_message:  'Ancaman signifikan, masih dapat dikendalikan. Aktifkan kesiapsiagaan.',
     is_sample_data:    true,
     score_breakdown: {
       hazard:     19.2,
@@ -225,8 +225,8 @@ export const MOCK_VULNERABILITY = {
     city_label:        'DKI Jakarta',
     score:             100.0,      // 81.3 base + 25 weather (cap 100)
     base_score:         81.3,
-    category:          '🔴 KRITIS',
-    category_message:  'Risiko kritis. Segera mulai tindakan evakuasi.',
+    category:          '🔴 AWAS',
+    category_message:  'Ancaman tinggi, membahayakan masyarakat. Segera lakukan evakuasi.',
     is_sample_data:    true,
     score_breakdown: {
       hazard:     24.0,
@@ -250,7 +250,7 @@ export const MOCK_VULNERABILITY = {
     elevation_mean:    8.0,
     elevation_min:     -3.5,
     priority_actions: [
-      '⛈️  Hujan Lebat + Petir terdeteksi — skor KRITIS',
+      '⛈️  Hujan Lebat + Petir terdeteksi — skor AWAS',
       '🚨 SEGERA: Aktifkan Posko Darurat tingkat kota',
       '🚨 SEGERA: Identifikasi 1,858,560 warga rentan di zona banjir',
       '🚨 SEGERA: Deploy tim SAR ke Penjaringan, Pluit, Cengkareng',
@@ -268,7 +268,7 @@ export const MOCK_VULNERABILITY = {
 }
 
 export const MOCK_NARASI = {
-  semarang: `⛈️ SITUASI KRITIS — Kota Semarang saat ini menghadapi ancaman banjir serius. Hujan lebat (68.4mm/12jam) yang sedang terjadi mendorong skor risiko ke level KRITIS (87.4/100). Dari 1,653,524 jiwa penduduk, diperkirakan 229,610 jiwa berada di zona terdampak dengan 291,021 warga rentan membutuhkan prioritas evakuasi.
+  semarang: `⛈️ SITUASI AWAS — Kota Semarang saat ini menghadapi ancaman banjir serius. Hujan lebat (68.4mm/12jam) yang sedang terjadi mendorong skor risiko ke level AWAS (87.4/100). Dari 1,653,524 jiwa penduduk, diperkirakan 229,610 jiwa berada di zona terdampak dengan 291,021 warga rentan membutuhkan prioritas evakuasi.
 
 TINDAKAN PRIORITAS:
   1. 🚨 SEGERA: Aktifkan Posko Darurat Bencana tingkat kota
@@ -328,3 +328,4 @@ export const MOCK_FLOOD_ZONES = {
     { id: 'jkt-pusat',  name: 'Jakarta Pusat', risk: 'medium', coords: [[-6.15,106.82],[-6.15,106.90],[-6.23,106.90],[-6.23,106.82]], pop_est:  900000, note: 'Risiko sedang' },
   ],
 }
+

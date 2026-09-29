@@ -1,7 +1,21 @@
 # Level Siaga Banjir Indonesia
 
-> Sumber: Perka BNPB No. 7 Tahun 2015 + SOP BPBD
-> Status: TEMPLATE — isi dengan data dari file yang sudah didownload
+> Sumber: BMKG, BBWS, SOP BPBD
+> Status: TEMPLATE — isi dengan angka TMA spesifik per sungai dari BPBD setempat
+
+---
+
+## Klarifikasi: Dua Sistem yang Berbeda
+
+**Level Siaga Banjir (dokumen ini)** = Level teknis berbasis Tinggi Muka Air (TMA)
+sungai. Digunakan oleh petugas lapangan dan BPBD untuk operasional.
+
+**Status Keadaan Darurat BNPB** = Penetapan formal pemerintah (Bupati/Gubernur/Presiden)
+yang membuka akses dana darurat dan kewenangan khusus.
+→ Lihat: `sop/status_keadaan_darurat_bnpb.md`
+
+Keduanya berjalan paralel. Level TMA memicu tindakan lapangan.
+Status BNPB memungkinkan dukungan sumber daya yang lebih besar.
 
 ---
 

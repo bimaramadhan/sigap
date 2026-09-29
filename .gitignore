@@ -1,0 +1,44 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# ── Environment — JANGAN pernah commit file ini ───────────────────────────────
+.env
+# .env.example boleh di-commit (tidak ada secret di dalamnya)
+
+# ── Data & Cache — terlalu besar dan berubah terus ────────────────────────────
+data/cache/
+data/poc_result_*.json
+
+# ── Knowledge raw files — semua file di raw/ tidak di-push ───────────────────
+knowledge/raw/*
+knowledge/raw/**/*
+# Kecuali file placeholder README
+!knowledge/raw/TARUH_FILE_DISINI.md
+
+# ── Node.js ───────────────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+
+# ── Google Cloud credentials — JANGAN commit ──────────────────────────────────
+*.json
+!data/sample/*.json
+# Exception: boleh commit file json di data/sample
+service-account-key.json
+application_default_credentials.json
+gcloud/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/settings.json
+.idea/
+*.swp

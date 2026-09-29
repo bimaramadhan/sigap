@@ -81,6 +81,11 @@ CITY_BOUNDS = {
         "label":    "DKI Jakarta",
         "province": "DKI Jakarta",
     },
+    "surabaya": {
+        "bbox":     [112.60, -7.40, 112.85, -7.15],
+        "label":    "Kota Surabaya",
+        "province": "Jawa Timur",
+    },
 }
 
 
@@ -526,6 +531,21 @@ _CITY_STATIC = {
         "flood_history": {
             "historical_events": 22,
             "avg_per_year":      1.22,
+            "period":            "2000-2018",
+            "source":            "Global Flood Database / BNPB DIBI",
+        },
+    },
+    "surabaya": {
+        "dem": {
+            "elevation_mean": 4.5,    # Kota sangat datar, dekat laut Jawa
+            "elevation_min":  0.0,    # Area pesisir/pantai
+            "elevation_max":  25.0,
+            "elevation_std":  6.2,
+            "source": "SRTM",
+        },
+        "flood_history": {
+            "historical_events": 12,
+            "avg_per_year":      0.67,
             "period":            "2000-2018",
             "source":            "Global Flood Database / BNPB DIBI",
         },

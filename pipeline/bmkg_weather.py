@@ -54,6 +54,13 @@ ADM4_CODES: dict[str, list[dict]] = {
         {"adm4": "31.71.01.1001", "kecamatan": "Gambir",          "area": "Gambir"},
         {"adm4": "31.75.01.1001", "kecamatan": "Matraman",        "area": "Pisangan Baru"},
     ],
+    "surabaya": [
+        {"adm4": "35.78.04.1001", "kecamatan": "Pabean Cantikan", "area": "Nyamplungan"},
+        {"adm4": "35.78.02.1001", "kecamatan": "Kenjeran",        "area": "Bulak Banteng"},
+        {"adm4": "35.78.03.1001", "kecamatan": "Semampir",        "area": "Ujung"},
+        {"adm4": "35.78.06.1001", "kecamatan": "Bulak",           "area": "Kedung Cowek"},
+        {"adm4": "35.78.05.1001", "kecamatan": "Bubutan",         "area": "Gundih"},
+    ],
 }
 
 # ── Weather Code Mapping (BMKG standard) ──────────────────────────────────────

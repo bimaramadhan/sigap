@@ -50,6 +50,11 @@ CITY_BOUNDS: dict[str, dict] = {
         "province": "DKI Jakarta",
         "label":    "DKI Jakarta",
     },
+    "surabaya": {
+        "bbox":     [112.60, -7.40, 112.85, -7.15],
+        "province": "Jawa Timur",
+        "label":    "Kota Surabaya",
+    },
 }
 
 # EE Dataset IDs

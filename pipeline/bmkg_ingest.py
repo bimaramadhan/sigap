@@ -36,6 +36,7 @@ CITY_PROVINCE_MAP = {
     "bekasi":   "Jawa Barat",
     "jakarta":  "DKI Jakarta",
     "bandung":  "Jawa Barat",
+    "surabaya": "Jawa Timur",
 }
 
 # Kata kunci yang menandakan potensi banjir di deskripsi BMKG

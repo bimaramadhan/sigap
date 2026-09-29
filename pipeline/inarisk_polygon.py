@@ -53,6 +53,7 @@ CITY_BOUNDS = {
     "semarang": [110.29, -7.11, 110.51, -6.96],
     "bekasi":   [106.88, -6.38, 107.05, -6.17],
     "jakarta":  [106.68, -6.38, 107.00, -6.08],
+    "surabaya": [112.60, -7.40, 112.85, -7.15],
 }
 
 # Klasifikasi indeks bahaya → risk level (sesuai BNPB No.3/2025)

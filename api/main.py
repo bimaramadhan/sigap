@@ -48,7 +48,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-SUPPORTED_CITIES = ["semarang", "bekasi", "jakarta"]
+SUPPORTED_CITIES = ["semarang", "bekasi", "jakarta", "surabaya"]
 
 
 # ── Response Models ───────────────────────────────────────────────────────────

@@ -73,6 +73,14 @@ RIVERS_BY_CITY = {
         "Banjir Kanal Timur",
         "Kali Krukut",
     ],
+    "surabaya": [
+        "Kali Mas",
+        "Kali Surabaya",
+        "Kali Wonokromo",
+        "Kali Kenjeran",
+        "Kali Lamong",
+        "Kali Kedurus",
+    ],
 }
 
 

@@ -10,9 +10,10 @@
  */
 
 export const MOCK_CITIES = [
-  { id: 'semarang', label: 'Kota Semarang',   province: 'Jawa Tengah', bbox: [110.29, -7.11, 110.51, -6.96] },
-  { id: 'bekasi',   label: 'Kota/Kab Bekasi', province: 'Jawa Barat',  bbox: [106.88, -6.38, 107.05, -6.17] },
-  { id: 'jakarta',  label: 'DKI Jakarta',     province: 'DKI Jakarta', bbox: [106.68, -6.38, 107.00, -6.08] },
+  { id: 'semarang',  label: 'Kota Semarang',   province: 'Jawa Tengah', bbox: [110.29, -7.11, 110.51, -6.96] },
+  { id: 'bekasi',    label: 'Kota/Kab Bekasi',  province: 'Jawa Barat',  bbox: [106.88, -6.38, 107.05, -6.17] },
+  { id: 'jakarta',   label: 'DKI Jakarta',      province: 'DKI Jakarta', bbox: [106.68, -6.38, 107.00, -6.08] },
+  { id: 'surabaya',  label: 'Kota Surabaya',    province: 'Jawa Timur',  bbox: [112.60, -7.40, 112.85, -7.15] },
 ]
 
 export const MOCK_ALERTS = {
@@ -416,3 +417,121 @@ export function addMockReport(data) {
 export function clearMockReports(city) {
   _mockReportStore[city] = []
 }
+
+// ── Surabaya additions ────────────────────────────────────────────────────────
+
+// Tambahkan alert Surabaya ke MOCK_ALERTS (extend setelah file dimuat)
+MOCK_ALERTS.alerts.push({
+  id:              'CJT20260922005',
+  province:        'Jawa Timur',
+  title:           'Hujan Lebat disertai Petir di Jawa Timur',
+  severity:        'Severe',
+  kecamatan_count: 14,
+  effective:       new Date().toISOString(),
+  expires:         new Date(Date.now() + 4 * 3600000).toISOString(),
+  is_flood:        true,
+})
+
+// Vulnerability mock Surabaya
+MOCK_VULNERABILITY.surabaya = {
+  city:              'surabaya',
+  city_label:        'Kota Surabaya',
+  score:             76.2,
+  base_score:        63.5,
+  category:          '🔴 AWAS',
+  category_message:  'Ancaman tinggi, membahayakan masyarakat. Segera lakukan evakuasi.',
+  is_sample_data:    true,
+  score_breakdown: {
+    hazard:     22.4,
+    exposure:   20.1,
+    vulnerable: 12.8,
+    history:     6.7,
+    elevation:   8.0,
+    weather:    12.7,
+    alert:       0.0,
+  },
+  weather_boost:   12.7,
+  weather_desc:    'Hujan Sedang',
+  weather_risk:    'medium',
+  alert_boost:      0.0,
+  alert_reason:    '',
+  flood_ratio_10yr:  0.52,
+  total_population:  2874699,
+  est_vulnerable:    506147,
+  density_per_km2:   8463,
+  historical_events: 12,
+  elevation_mean:    4.5,
+  elevation_min:     0.0,
+  priority_actions: [
+    '🌧️  Hujan Sedang terdeteksi — skor naik +12.7 poin dari baseline',
+    '🚨 SEGERA: Aktifkan Posko Darurat Bencana tingkat kota',
+    '🚨 SEGERA: Identifikasi 506,147 warga rentan di zona banjir',
+    '🌊 52% area Surabaya berpotensi terkena banjir',
+    '🌊 Area pesisir Kenjeran, Bulak, Semampir prioritas utama',
+    '📊 12 kejadian banjir historis (2000-2018)',
+  ],
+  resource_needs: {
+    estimated_affected: 596576,
+    perahu_minimal:     1193,
+    titik_evakuasi:     2983,
+    tim_sar_minimal:    1790,
+    logistik_hari:      3,
+  },
+}
+
+// Weather mock Surabaya
+MOCK_WEATHER.surabaya = {
+  city:                'surabaya',
+  fetched_at:          new Date().toISOString(),
+  rainfall_12h_mm:     23.8,
+  worst_weather_code:  63,
+  worst_weather_desc:  'Hujan Sedang',
+  worst_weather_emoji: '🌧️',
+  weather_risk:        'medium',
+  boost_score:         8,
+  boost_reason:        'Hujan sedang (>20mm/12jam)',
+  is_rainy_season:     true,
+  kecamatan_count:     5,
+  kecamatan_data: [
+    { kecamatan: 'Kenjeran',        area: 'Bulak Banteng',  rainfall_12h: 23.8, max_tp_3h: 8.1, worst_weather: 'Hujan Sedang' },
+    { kecamatan: 'Semampir',        area: 'Ujung',           rainfall_12h: 21.4, max_tp_3h: 7.3, worst_weather: 'Hujan Sedang' },
+    { kecamatan: 'Pabean Cantikan', area: 'Nyamplungan',     rainfall_12h: 19.2, max_tp_3h: 6.5, worst_weather: 'Hujan Ringan' },
+    { kecamatan: 'Bulak',           area: 'Kedung Cowek',    rainfall_12h: 17.1, max_tp_3h: 5.8, worst_weather: 'Hujan Ringan' },
+    { kecamatan: 'Bubutan',         area: 'Gundih',          rainfall_12h: 12.3, max_tp_3h: 4.2, worst_weather: 'Hujan Ringan' },
+  ],
+  source: 'BMKG Prakiraan Cuaca API',
+}
+
+// Narasi mock Surabaya
+MOCK_NARASI.surabaya = `🚨 SITUASI AWAS — Kota Surabaya dalam kondisi risiko banjir tinggi (76.2/100). Hujan sedang (23.8mm/12jam) memperburuk kondisi di area pesisir utara. Dari 2,874,699 jiwa penduduk, diperkirakan 596,576 jiwa di zona terdampak dengan 506,147 warga rentan membutuhkan perhatian khusus.
+
+TINDAKAN PRIORITAS:
+  1. 🚨 SEGERA: Aktifkan Posko Darurat Bencana tingkat kota
+  2. 🚨 SEGERA: Prioritaskan evakuasi Kenjeran, Bulak, Semampir — area pesisir paling rawan
+  3. 🌊 Monitor level Kali Mas dan Kali Surabaya setiap 1 jam
+  4. 🚨 Siapkan 2,983 titik pengungsian untuk 596,576 jiwa terdampak
+  5. 📞 Koordinasi TNI/Polri untuk bantuan evakuasi pesisir utara
+
+Kebutuhan minimal: 1,193 perahu, 1,790 tim SAR, 2,983 titik pengungsian.`
+
+// City center dan flood zones Surabaya
+CITY_CENTERS.surabaya = { center: [-7.265, 112.74], zoom: 12 }
+
+MOCK_FLOOD_ZONES.surabaya = [
+  { id: 'sby-kenjeran',  name: 'Kenjeran',        risk: 'high',   coords: [[-7.19,112.76],[-7.19,112.79],[-7.24,112.79],[-7.24,112.76]], pop_est: 180000, note: 'Area pesisir — rawan banjir rob' },
+  { id: 'sby-semampir',  name: 'Semampir',         risk: 'high',   coords: [[-7.20,112.72],[-7.20,112.76],[-7.24,112.76],[-7.24,112.72]], pop_est: 220000, note: 'Dekat pelabuhan — sering banjir' },
+  { id: 'sby-pabean',    name: 'Pabean Cantikan',  risk: 'medium', coords: [[-7.21,112.72],[-7.21,112.74],[-7.23,112.74],[-7.23,112.72]], pop_est: 95000,  note: 'Area kota tua — drainase lama' },
+  { id: 'sby-bubutan',   name: 'Bubutan',          risk: 'low',    coords: [[-7.24,112.72],[-7.24,112.74],[-7.27,112.74],[-7.27,112.72]], pop_est: 120000, note: 'Bantaran Kali Mas' },
+]
+
+MOCK_RIVERS.surabaya = [
+  'Kali Mas',
+  'Kali Surabaya',
+  'Kali Wonokromo',
+  'Kali Kenjeran',
+  'Kali Lamong',
+  'Kali Kedurus',
+]
+
+MOCK_FLOOD_REPORTS.surabaya = { city: 'surabaya', report_count: 0, latest_boost: 0, boost_reason: '', reports: [] }
+_mockReportStore.surabaya = []

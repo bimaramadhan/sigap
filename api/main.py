@@ -597,3 +597,31 @@ def clear_flood_reports(city: str):
         return {"city": city, "cleared": count, "message": f"Berhasil menghapus {count} laporan"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Flood Polygon Endpoints (BARU) ────────────────────────────────────────────
+
+@app.get("/flood-polygons/{city}", tags=["Map Data"])
+def get_flood_polygons(city: str, force: bool = Query(False)):
+    """
+    Polygon batas kecamatan + Indeks Bahaya Banjir dari InaRisk BNPB.
+
+    Menggantikan rectangular mock zones di frontend dengan polygon
+    kecamatan yang akurat + nilai bahaya riil dari BNPB.
+
+    Format: GeoJSON FeatureCollection (standard [lon,lat])
+    Properties per feature: name, kab, prov, hazard (0-1), risk, color
+
+    Note: Request pertama mungkin lambat (~20-30s) karena query ke InaRisk.
+          Hasil di-cache 7 hari.
+    """
+    city = _validate_city(city)
+    try:
+        from pipeline.inarisk_polygon import get_flood_polygons as _get_polygons
+        return _get_polygons(city, force_refresh=force)
+    except Exception as e:
+        logger.error(f"Error fetching flood polygons: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"InaRisk polygon service tidak tersedia: {str(e)}"
+        )

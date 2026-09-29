@@ -187,3 +187,19 @@ export async function clearFloodReports(city) {
     return { city, cleared: 0 }
   }
 }
+
+// ── Flood Polygon API ─────────────────────────────────────────────────────────
+
+export async function getFloodPolygons(city) {
+  if (USE_MOCK) {
+    // Dalam mock mode, return null — MapView akan pakai MOCK_FLOOD_ZONES
+    return null
+  }
+  try {
+    const { data } = await http.get(`/flood-polygons/${city}`, { timeout: 45000 })
+    return data
+  } catch (e) {
+    console.warn(`Flood polygon tidak tersedia (${city}), pakai mock zones`)
+    return null
+  }
+}

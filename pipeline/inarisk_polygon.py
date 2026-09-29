@@ -125,12 +125,13 @@ def _polygon_centroid(rings: list) -> tuple[float, float]:
     return (sum(xs) / len(xs), sum(ys) / len(ys))
 
 
-def _rings_to_leaflet(rings: list) -> list:
+def _rings_to_geojson(rings: list) -> list:
     """
-    Konversi ArcGIS rings ke format Leaflet [[lat, lon], ...].
-    ArcGIS pakai [lon, lat], Leaflet pakai [lat, lon].
+    Return rings dalam format standard GeoJSON [lon, lat].
+    ArcGIS output sudah dalam [lon, lat] — tidak perlu konversi.
+    Ini berbeda dari Leaflet Polygon yang pakai [lat, lon].
     """
-    return [[[pt[1], pt[0]] for pt in ring] for ring in rings]
+    return rings   # [lon, lat] — standard GeoJSON
 
 
 def _simplify_polygon(rings: list, tolerance: float = 0.0005) -> list:
@@ -323,19 +324,19 @@ def get_flood_polygons(city: str, force_refresh: bool = False) -> dict:
 
         # Simplifikasi polygon untuk performa Leaflet
         simplified_rings = _simplify_polygon(kec["rings"], tolerance=0.0003)
-        # Konversi ke format Leaflet [lat, lon]
-        leaflet_coords = _rings_to_leaflet(simplified_rings)
+        # Simpan dalam format standard GeoJSON [lon, lat]
+        geojson_rings = _rings_to_geojson(simplified_rings)
 
         # Geometry type: Polygon jika 1 ring, MultiPolygon jika lebih
-        if len(leaflet_coords) == 1:
+        if len(geojson_rings) == 1:
             geometry = {
                 "type":        "Polygon",
-                "coordinates": leaflet_coords,
+                "coordinates": geojson_rings,
             }
         else:
             geometry = {
                 "type":        "MultiPolygon",
-                "coordinates": [[ring] for ring in leaflet_coords],
+                "coordinates": [[ring] for ring in geojson_rings],
             }
 
         geojson_features.append({

@@ -54,6 +54,9 @@ LAYERS = {
     "vulnerability":  "INDEKS_KERENTANAN_BANJIR",    # Indeks kerentanan banjir 0-1
     "capacity":       "INDEKS_KAPASITAS_2021",        # Indeks kapasitas daerah 0-1
     "population":     "INARISKPOP_2020",              # Populasi 2020 (jiwa per 100m²)
+    # Layer baru — lebih akurat dan otoritatif
+    "flood_risk":     "layer_risiko_banjir",          # Indeks Risiko FINAL dari BNPB (0-1)
+    "sea_level_rise": "SLR",                          # Sea Level Rise index (0-1), resolusi 30m
 }
 
 # Klasifikasi nilai indeks → kategori
@@ -95,7 +98,7 @@ SAMPLE_DATA = {
     "semarang": {
         "flood_hazard": {
             "mean": 0.612, "max": 0.889, "min": 0.0,
-            "high_ratio": 0.48,  # 48% area dengan hazard >= 0.6
+            "high_ratio": 0.48,
             "n_samples": 35,
         },
         "vulnerability": {
@@ -110,6 +113,17 @@ SAMPLE_DATA = {
             "mean": 114.2, "max": 298.4, "min": 0.0,
             "total_est": 1653524,
             "n_samples": 35,
+        },
+        # Data baru dari layer_risiko_banjir dan SLR
+        "flood_risk": {
+            "mean": 0.628, "max": 0.791, "min": 0.0,
+            "n_samples": 35,
+            "_source": "InaRisk BNPB — layer_risiko_banjir (sample)",
+        },
+        "sea_level_rise": {
+            "mean": 0.42, "max": 1.0, "min": 0.0,
+            "n_samples": 35,
+            "_source": "InaRisk BNPB — SLR (sample, Smarang Utara=1.0)",
         },
         "_is_sample": True,
         "_note": "Berdasarkan query nyata ke InaRisk untuk kota Semarang",
@@ -393,7 +407,7 @@ def get_all_features(city: str, force_refresh: bool = False) -> dict:
         results["population"] = {**SAMPLE_DATA[city]["population"], "_fallback": True}
 
     # ── Layer 4: Vulnerability (paling lambat, terakhir) ─────────────────────
-    logger.info("  [4/4] INDEKS_KERENTANAN_BANJIR (bisa lambat)...")
+    logger.info("  [4/5] INDEKS_KERENTANAN_BANJIR (bisa lambat)...")
     try:
         vuln = _query_layer_grid("INDEKS_KERENTANAN_BANJIR", bbox, step=0.03)
         vuln["_source"] = "InaRisk BNPB — INDEKS_KERENTANAN_BANJIR"
@@ -402,6 +416,28 @@ def get_all_features(city: str, force_refresh: bool = False) -> dict:
     except Exception as e:
         logger.warning(f"    Vulnerability gagal: {e} → pakai sample")
         results["vulnerability"] = {**SAMPLE_DATA[city]["vulnerability"], "_fallback": True}
+
+    # ── Layer 5: Flood Risk (indeks risiko final dari BNPB) ───────────────────
+    logger.info("  [5/6] layer_risiko_banjir (indeks risiko FINAL BNPB)...")
+    try:
+        flood_risk = _query_layer_grid("layer_risiko_banjir", bbox, step=0.02)
+        flood_risk["_source"] = "InaRisk BNPB — layer_risiko_banjir"
+        results["flood_risk"] = flood_risk
+        logger.success(f"    Flood risk (BNPB) mean={flood_risk['mean']:.3f}")
+    except Exception as e:
+        logger.warning(f"    Flood risk gagal: {e} → pakai computed value")
+        results["flood_risk"] = {"mean": 0.0, "n_samples": 0, "_fallback": True}
+
+    # ── Layer 6: Sea Level Rise (relevan untuk kota pesisir) ──────────────────
+    logger.info("  [6/6] SLR (Sea Level Rise index, 30m)...")
+    try:
+        slr = _query_layer_grid("SLR", bbox, step=0.02)
+        slr["_source"] = "InaRisk BNPB — SLR (Sea Level Rise)"
+        results["sea_level_rise"] = slr
+        logger.success(f"    SLR mean={slr['mean']:.3f} (1.0 = risiko SLR maksimum)")
+    except Exception as e:
+        logger.warning(f"    SLR gagal: {e}")
+        results["sea_level_rise"] = {"mean": 0.0, "n_samples": 0, "_fallback": True}
 
     # ── Hitung metrik turunan ─────────────────────────────────────────────────
     hazard_vals = results["flood_hazard"]
@@ -416,12 +452,21 @@ def get_all_features(city: str, force_refresh: bool = False) -> dict:
     # Map ke proporsi populasi rentan (0-1)
     vuln_ratio  = round(min(0.35, vuln_mean * 0.5), 4)
 
-    # Risk score InaRisk: kombinasi bahaya, kerentanan, kapasitas
-    # Formula sederhana: risk = hazard × vulnerability / capacity
-    cap_val  = max(0.1, results["capacity"].get("mean", 0.5))
-    vuln_val = vuln_mean if vuln_mean > 0.01 else 0.4  # fallback kalau vulnerability gagal
-    raw_risk = hazard_vals.get("mean", 0) * vuln_val / cap_val
-    inarisk_score = round(min(1.0, raw_risk), 4)
+    # ── Risk Score — prioritaskan layer_risiko_banjir dari BNPB ─────────────
+    # Lebih akurat daripada menghitung sendiri (BNPB sudah hitung hazard×vuln/cap)
+    flood_risk_data = results.get("flood_risk", {})
+    if flood_risk_data.get("mean", 0) > 0:
+        inarisk_score = round(flood_risk_data["mean"], 4)
+        logger.info(f"  inarisk_score dari layer_risiko_banjir (BNPB): {inarisk_score}")
+    else:
+        # Fallback: hitung dari komponen
+        cap_val  = max(0.1, results["capacity"].get("mean", 0.5))
+        vuln_val = vuln_mean if vuln_mean > 0.01 else 0.4
+        inarisk_score = round(min(1.0, hazard_vals.get("mean", 0) * vuln_val / cap_val), 4)
+        logger.info(f"  inarisk_score dihitung dari komponen: {inarisk_score}")
+
+    # ── Sea Level Rise ───────────────────────────────────────────────────────
+    slr_mean = results.get("sea_level_rise", {}).get("mean", 0.0)
 
     is_any_fallback = any(
         results[k].get("_fallback") or results[k].get("_is_sample")
@@ -429,9 +474,10 @@ def get_all_features(city: str, force_refresh: bool = False) -> dict:
     )
 
     results.update({
-        "flood_ratio":    flood_ratio,
+        "flood_ratio":         flood_ratio,
         "vulnerability_ratio": vuln_ratio,
-        "inarisk_score":  inarisk_score,
+        "inarisk_score":       inarisk_score,
+        "slr_mean":            slr_mean,
         "_source":        "InaRisk BNPB GIS Service",
         "_is_sample":     is_any_fallback,
         "_fetched_at":    __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
@@ -646,6 +692,9 @@ def to_vulnerability_format(city: str, inarisk_data: dict) -> dict:
         "inarisk_hazard_mean": inarisk_data.get("flood_hazard", {}).get("mean", 0),
         "inarisk_capacity":    inarisk_data.get("capacity", {}).get("mean", 0.5),
         "inarisk_score":       inarisk_data.get("inarisk_score", 0),
+        # Layer baru
+        "inarisk_risk_mean":   inarisk_data.get("flood_risk", {}).get("mean", 0),
+        "slr_mean":            inarisk_data.get("slr_mean", 0.0),
         "_is_sample":          is_samp,
         "_source":             "InaRisk BNPB GIS Service",
     }

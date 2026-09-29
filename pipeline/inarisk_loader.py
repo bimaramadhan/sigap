@@ -481,6 +481,168 @@ def get_sample_data(city: str) -> dict:
     return {"city": city, "config": CITY_BOUNDS[city], **SAMPLE_DATA[city]}
 
 
+# ── Static Reference Data (untuk field yang tidak ada di InaRisk) ─────────────
+# DEM dan historis banjir — dari data BPS, BNPB, dan penelitian akademik
+
+_CITY_STATIC = {
+    "semarang": {
+        "dem": {
+            "elevation_mean": 18.4,
+            "elevation_min":  -2.0,   # Area pesisir di bawah laut
+            "elevation_max":  348.0,
+            "elevation_std":  52.3,
+            "source": "SRTM via BNPB/Penelitian Akademik",
+        },
+        "flood_history": {
+            "historical_events": 14,
+            "avg_per_year":      0.78,
+            "period":            "2000-2018",
+            "source":            "Global Flood Database / BNPB DIBI",
+        },
+    },
+    "bekasi": {
+        "dem": {
+            "elevation_mean": 19.2,
+            "elevation_min":  4.0,
+            "elevation_max":  72.0,
+            "elevation_std":  12.1,
+            "source": "SRTM",
+        },
+        "flood_history": {
+            "historical_events": 18,
+            "avg_per_year":      1.0,
+            "period":            "2000-2018",
+            "source":            "Global Flood Database / BNPB DIBI",
+        },
+    },
+    "jakarta": {
+        "dem": {
+            "elevation_mean": 8.0,
+            "elevation_min":  -3.5,   # Sebagian besar pesisir di bawah laut
+            "elevation_max":  50.0,
+            "elevation_std":  18.2,
+            "source": "SRTM",
+        },
+        "flood_history": {
+            "historical_events": 22,
+            "avg_per_year":      1.22,
+            "period":            "2000-2018",
+            "source":            "Global Flood Database / BNPB DIBI",
+        },
+    },
+}
+
+
+def to_vulnerability_format(city: str, inarisk_data: dict) -> dict:
+    """
+    Konversi output InaRisk ke format yang diharapkan vulnerability.py.
+
+    vulnerability.py membaca:
+      - config, dem, flood_hazard.10yr, flood_history, population, _is_sample
+
+    Args:
+        city:         Nama kota
+        inarisk_data: Output dari get_all_features()
+
+    Returns:
+        Dict compatible dengan ee_loader.get_all_features() format
+    """
+    city    = city.lower()
+    static  = _CITY_STATIC.get(city, _CITY_STATIC["semarang"])
+    cfg     = inarisk_data.get("config", CITY_BOUNDS.get(city, {}))
+    bbox    = cfg.get("bbox", [0, 0, 0, 0])
+    is_samp = inarisk_data.get("_is_sample", True)
+
+    # ── Flood Hazard ────────────────────────────────────────────────────────
+    flood_ratio = inarisk_data.get("flood_ratio", 0.35)
+
+    # Estimasi area breakdown dari flood_ratio
+    west, south, east, north = bbox
+    lat_mid   = (south + north) / 2
+    import math
+    width_km  = (east - west) * 111 * math.cos(math.radians(lat_mid))
+    height_km = (north - south) * 111
+    total_km2 = round(width_km * height_km, 2)
+    safe_km2  = round(total_km2 * (1 - flood_ratio), 2)
+    flood_km2 = round(total_km2 * flood_ratio, 2)
+
+    flood_hazard_10yr = {
+        "city":             city,
+        "return_period_yr": 10,
+        "area_km2": {
+            "safe":   safe_km2,
+            "low":    round(flood_km2 * 0.3, 2),
+            "medium": round(flood_km2 * 0.35, 2),
+            "high":   round(flood_km2 * 0.35, 2),
+        },
+        "total_area_km2": total_km2,
+        "flood_ratio":    flood_ratio,
+        "source":         "InaRisk BNPB — INDEKS_BAHAYA_BANJIR",
+    }
+
+    # ── Population ──────────────────────────────────────────────────────────
+    pop_data    = inarisk_data.get("population", {})
+    total_pop   = pop_data.get("total_est", 0)
+    density     = round(total_pop / total_km2, 1) if total_km2 > 0 else 0
+
+    # Vulnerability ratio dari InaRisk kerentanan (atau fallback ke proporsi BPS nasional)
+    vuln_ratio  = inarisk_data.get("vulnerability_ratio", 0.176)
+    if vuln_ratio <= 0.01:  # Kalau InaRisk kerentanan gagal
+        vuln_ratio = 0.176  # Proporsi nasional BPS (lansia 9.6% + balita 8.0%)
+
+    est_elderly   = round(total_pop * 0.096)
+    est_children  = round(total_pop * 0.080)
+    est_vulnerable= round(total_pop * vuln_ratio)
+
+    population = {
+        "city":               city,
+        "year":               2020,
+        "total_population":   total_pop,
+        "area_km2":           total_km2,
+        "density_per_km2":    density,
+        "elderly_ratio":      0.096,
+        "children_ratio":     0.080,
+        "vulnerability_ratio":vuln_ratio,
+        "est_elderly":        est_elderly,
+        "est_children":       est_children,
+        "est_vulnerable":     est_vulnerable,
+        "source":             "InaRisk BNPB — INARISKPOP_2020",
+    }
+
+    # ── Build final compatible dict ─────────────────────────────────────────
+    return {
+        "city":          city,
+        "config":        cfg,
+        "dem":           static["dem"],
+        "flood_hazard":  {
+            "10yr":  flood_hazard_10yr,
+            "100yr": {**flood_hazard_10yr,
+                      "return_period_yr": 100,
+                      "flood_ratio": min(1.0, flood_ratio * 1.55)},  # Approx 100yr
+        },
+        "flood_history": static["flood_history"],
+        "population":    population,
+        # Bonus fields dari InaRisk yang tidak ada di ee_loader
+        "inarisk_hazard_mean": inarisk_data.get("flood_hazard", {}).get("mean", 0),
+        "inarisk_capacity":    inarisk_data.get("capacity", {}).get("mean", 0.5),
+        "inarisk_score":       inarisk_data.get("inarisk_score", 0),
+        "_is_sample":          is_samp,
+        "_source":             "InaRisk BNPB GIS Service",
+    }
+
+
+def get_features_for_vulnerability(city: str) -> dict:
+    """
+    Convenience function — fetch InaRisk data lalu konversi ke format
+    vulnerability.py. Ini yang dipanggil sebagai pengganti ee_loader.
+
+    Returns:
+        Dict compatible dengan ee_loader.get_all_features()
+    """
+    inarisk = get_all_features(city)
+    return to_vulnerability_format(city, inarisk)
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import sys

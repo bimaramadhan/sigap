@@ -346,14 +346,23 @@ def get_weather(city: str):
 
 @app.get("/features/{city}", tags=["Data"])
 def get_features(city: str):
-    """Raw geospatial features dari Earth Engine."""
+    """
+    Raw geospatial features untuk satu kota.
+    Primary source: InaRisk BNPB (tidak butuh auth).
+    Fallback: Earth Engine (butuh GEE auth).
+    """
     city = _validate_city(city)
     try:
-        from pipeline.ee_loader import get_all_features
-        return get_all_features(city)
-    except Exception as e:
-        logger.error(f"Error fetching EE features: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        from pipeline.inarisk_loader import get_features_for_vulnerability
+        return get_features_for_vulnerability(city)
+    except Exception as e_inarisk:
+        logger.warning(f"InaRisk gagal: {e_inarisk} — fallback ke EE")
+        try:
+            from pipeline.ee_loader import get_all_features
+            return get_all_features(city)
+        except Exception as e_ee:
+            logger.error(f"EE juga gagal: {e_ee}")
+            raise HTTPException(status_code=500, detail=f"InaRisk: {e_inarisk}; EE: {e_ee}")
 
 
 @app.get("/vulnerability/{city}", response_model=VulnerabilityResponse, tags=["Analysis"])

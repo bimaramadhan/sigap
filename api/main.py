@@ -276,7 +276,7 @@ def health_check():
 
 @app.get("/cities", tags=["System"])
 def list_cities():
-    """List kota yang didukung."""
+    """List kota yang didukung penuh (4 kota dengan hardcoded data)."""
     from pipeline.ee_loader import CITY_BOUNDS
     return {
         "cities": [
@@ -285,6 +285,41 @@ def list_cities():
             if k in SUPPORTED_CITIES
         ]
     }
+
+
+@app.get("/cities/search", tags=["System"])
+def search_cities(
+    q:     str = Query(..., min_length=2, description="Nama kota atau provinsi"),
+    limit: int = Query(10, ge=1, le=50, description="Jumlah hasil maksimum"),
+):
+    """
+    Cari kabupaten/kota di seluruh Indonesia dari registry InaRisk BNPB.
+
+    Tidak terbatas pada 4 kota hardcoded — mencakup seluruh 514 kab/kota Indonesia.
+    Registry dibangun dari batas_administrasi/MapServer (InaRisk BNPB) dan
+    di-cache 30 hari.
+
+    Note: Request pertama mungkin lambat (~30-60s) karena download registry.
+          Subsequent requests sangat cepat (dari cache).
+
+    Contoh:
+      /cities/search?q=sema      → Semarang, Semarang Tengah, dll
+      /cities/search?q=bandung   → Kota Bandung, Kab Bandung, dll
+      /cities/search?q=jawa timur → semua kota di Jawa Timur
+    """
+    try:
+        from pipeline.city_registry import search_cities as _search, get_registry_stats
+        results = _search(q, limit=limit)
+        stats   = get_registry_stats()
+        return {
+            "query":        q,
+            "count":        len(results),
+            "total_cities": stats.get("total_cities", 0),
+            "results":      results,
+        }
+    except Exception as e:
+        logger.error(f"City search error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/alerts", response_model=AlertsResponse, tags=["Data"])

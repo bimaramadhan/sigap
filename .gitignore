@@ -27,12 +27,12 @@ frontend/dist/
 frontend/.env.local
 
 # ── Google Cloud credentials — JANGAN commit ──────────────────────────────────
-*.json
-!data/sample/*.json
-# Exception: boleh commit file json di data/sample
+# Hati-hati: jangan pakai *.json — itu akan ignore package.json juga!
 service-account-key.json
 application_default_credentials.json
 gcloud/
+*-credentials.json
+*-service-account.json
 
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store

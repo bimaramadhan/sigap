@@ -314,74 +314,151 @@ sigap/
 
 ### Prasyarat
 
-| Tools | Versi |
-|---|---|
-| Python | 3.10+ |
-| Node.js | 18+ |
+| Tools | Versi | Install |
+|---|---|---|
+| Python | 3.10+ | [python.org](https://python.org) atau `brew install python@3.11` |
+| Node.js | 18+ | [nodejs.org](https://nodejs.org) atau `brew install node` |
+| Git | any | `brew install git` atau Xcode Command Line Tools |
 
-### 1. Setup Python
+---
 
-```powershell
+### 🍎 Mac / Linux
+
+#### 1. Clone & masuk folder
+
+```bash
+git clone https://github.com/bimaramadhan/sigap.git
 cd sigap
-python -m venv .venv
-.venv\Scripts\activate
+```
+
+#### 2. Setup Python environment
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+
 pip install -r requirements.txt
-Copy-Item .env.example .env
 ```
 
-### 2. Jalankan backend
+> **Apple Silicon (M1/M2/M3)?** Paket geospatial (`geopandas`, `shapely`) sekarang
+> punya binary wheel untuk arm64 — biasanya langsung jalan tanpa Homebrew.
+> Kalau ada error saat install, jalankan dulu:
+> ```bash
+> brew install gdal proj geos
+> ```
 
-```powershell
+#### 3. Buat file `.env`
+
+```bash
+cp .env.example .env
+open .env          # buka di TextEdit, atau: nano .env / code .env
+```
+
+Isi `GEMINI_API_KEY` dengan API key gratis dari [aistudio.google.com](https://aistudio.google.com):
+
+```
+GEMINI_API_KEY=AQ.Ab8RN...   # key dari Google AI Studio
+GEMINI_MODEL=gemini-3.5-flash
+DEMO_MODE=false
+```
+
+#### 4. Jalankan backend
+
+```bash
+# Pastikan .venv masih aktif (ada "(venv)" di awal prompt)
 uvicorn api.main:app --reload --port 8080
-# API docs: http://localhost:8080/docs
 ```
 
-### 3. Jalankan frontend
+API docs tersedia di: http://localhost:8080/docs
 
-```powershell
+#### 5. Jalankan frontend (terminal baru)
+
+```bash
 cd frontend
-npm install   # sekali saja
-npm run dev   # http://localhost:3000
+npm install          # sekali saja
+npm run dev          # buka http://localhost:3000
 ```
 
-Untuk connect frontend ke backend real:
-```
-# frontend/.env.development
-VITE_USE_MOCK=false
+Pastikan frontend connect ke backend:
+```bash
+# cek isi file ini
+cat frontend/.env.development
+# harus ada: VITE_USE_MOCK=false
 ```
 
-### 4. Test data pipeline
+Kalau masih `true`, edit file tersebut:
+```bash
+echo "VITE_USE_MOCK=false" > frontend/.env.development
+```
 
-```powershell
-# Test BMKG real-time (tidak butuh setup)
+#### 6. Test cepat data pipeline
+
+```bash
+# Test BMKG real-time (tidak butuh setup apapun)
 python test_bmkg_live.py
 
-# Test InaRisk integration
+# Test InaRisk BNPB
 python test_inarisk_integration.py
 
-# Test weather boost ke vulnerability
-python test_weather_integration.py
-
-# Jalankan full POC (semua pipeline sekaligus)
+# Full pipeline satu kota
 python run_poc.py semarang
 ```
 
-### 5. Setup Gemini (opsional, untuk narasi AI adaptif)
+---
+
+### 🪟 Windows (PowerShell)
+
+#### 1. Clone & masuk folder
 
 ```powershell
-# 1. Install gcloud CLI: https://cloud.google.com/sdk/docs/install
-gcloud auth login
-gcloud projects create sigap-hackathon-2026
-gcloud config set project sigap-hackathon-2026
-gcloud services enable aiplatform.googleapis.com
-
-# 2. Authenticate untuk Gemini
-gcloud auth application-default login
-
-# 3. Update .env
-# GCP_PROJECT_ID=sigap-hackathon-2026
-# DEMO_MODE=false
+git clone https://github.com/bimaramadhan/sigap.git
+cd sigap
 ```
+
+#### 2. Setup Python environment
+
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+#### 3. Buat file `.env`
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+#### 4. Jalankan backend
+
+```powershell
+uvicorn api.main:app --reload --port 8080
+```
+
+#### 5. Jalankan frontend (terminal baru)
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+---
+
+### Setup Gemini API Key (wajib untuk narasi AI)
+
+1. Buka [aistudio.google.com](https://aistudio.google.com)
+2. Login dengan Google account
+3. Klik **"Get API Key"** → **"Create API key"**
+4. Copy key, paste ke `.env`:
+   ```
+   GEMINI_API_KEY=AQ...
+   GEMINI_MODEL=gemini-3.5-flash
+   ```
+5. Restart backend — narasi akan berubah dari *"Template Engine"* ke *"Gemini AI Studio (Free)"*
+
+Free tier: **15 request/menit, 1 juta token/hari** — lebih dari cukup untuk demo.
 
 ---
 

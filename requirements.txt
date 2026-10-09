@@ -1,7 +1,8 @@
 # ── Gemini AI — GRATIS via Google AI Studio ───────────────────────────────────
 # Daftar API key: https://aistudio.google.com → Get API Key
 # Limit free tier: 15 req/menit, 1 juta token/hari (lebih dari cukup untuk demo)
-google-generativeai>=0.7.0
+# SDK baru (google-generativeai sudah deprecated sejak 2025):
+google-genai>=1.0.0
 
 # ── Google Cloud (opsional — Vertex AI berbayar, EE butuh auth) ───────────────
 # Hanya dibutuhkan jika TIDAK pakai Google AI Studio

@@ -34,9 +34,13 @@ export async function getCities() {
   catch { return { cities: MOCK_CITIES } }
 }
 
-export async function getAlerts(floodOnly = true) {
+export async function getAlerts(floodOnly = true, city = null) {
   if (USE_MOCK) { await delay(800); return MOCK_ALERTS }
-  try { return (await http.get('/alerts', { params: { flood_only: floodOnly } })).data }
+  try {
+    const params = { flood_only: floodOnly }
+    if (city) params.city = city
+    return (await http.get('/alerts', { params })).data
+  }
   catch { console.warn('Fallback → mock alerts'); return MOCK_ALERTS }
 }
 

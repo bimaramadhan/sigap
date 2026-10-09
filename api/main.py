@@ -269,7 +269,7 @@ def health_check():
     return HealthResponse(
         status    = "ok",
         timestamp = datetime.now(timezone.utc).isoformat(),
-        version   = "0.2.0",
+        version   = "0.3.0",
         demo_mode = os.getenv("DEMO_MODE", "false").lower() == "true",
     )
 
@@ -324,13 +324,33 @@ def search_cities(
 
 @app.get("/alerts", response_model=AlertsResponse, tags=["Data"])
 def get_alerts(
-    flood_only: bool = Query(True, description="Hanya alert berpotensi banjir"),
+    flood_only: bool = Query(True,  description="Hanya alert berpotensi banjir"),
+    city:       str  = Query(None,  description="Filter per kota (semarang/jakarta/bekasi/surabaya)"),
 ):
-    """Peringatan dini cuaca aktif dari BMKG (cache 30 menit)."""
+    """
+    Peringatan dini cuaca aktif dari BMKG (cache 30 menit).
+
+    Jika `city` diisi, hanya return alert untuk provinsi kota tersebut.
+    Contoh: /alerts?city=semarang → hanya alert Jawa Tengah.
+    """
     try:
-        from pipeline.bmkg_ingest import fetch_active_alerts
-        alerts     = fetch_active_alerts(flood_only=flood_only)
-        all_alerts = fetch_active_alerts(flood_only=False) if flood_only else alerts
+        from pipeline.bmkg_ingest import fetch_active_alerts, CITY_PROVINCE_MAP
+        all_raw    = fetch_active_alerts(flood_only=False)
+        flood_raw  = [a for a in all_raw if a.is_flood] if flood_only else all_raw
+
+        # Filter per provinsi kota jika parameter city diisi
+        if city:
+            city_key  = city.lower()
+            city_prov = CITY_PROVINCE_MAP.get(city_key, "").lower()
+            if city_prov:
+                flood_raw = [
+                    a for a in flood_raw
+                    if city_prov in a.province.lower()
+                ]
+                all_raw = [
+                    a for a in all_raw
+                    if city_prov in a.province.lower()
+                ]
 
         summaries = [
             AlertSummary(
@@ -343,12 +363,12 @@ def get_alerts(
                 expires         = a.expires or "",
                 is_flood        = a.is_flood,
             )
-            for a in alerts
+            for a in flood_raw
         ]
         return AlertsResponse(
             fetched_at   = datetime.now(timezone.utc).isoformat(),
-            total_alerts = len(all_alerts),
-            flood_alerts = len([a for a in all_alerts if a.is_flood]),
+            total_alerts = len(all_raw),
+            flood_alerts = len([a for a in all_raw if a.is_flood]),
             alerts       = summaries,
         )
     except Exception as e:
@@ -436,7 +456,7 @@ def get_vulnerability(
                 extra = min(field["boost_score"], max(0, 30 - result.weather_boost - result.alert_boost))
                 result.score           = round(min(100, result.score + extra), 1)
                 result.priority_actions.insert(0,
-                    f"📡 Laporan lapangan: {field['boost_reason']} (+{extra:.0f} poin)"
+                    f"📡 Laporan lapangan: {field.get('boost_reason') or field.get('reason', '')} (+{extra:.0f} poin)"
                 )
                 # Update kategori
                 from engine.vulnerability import _get_category

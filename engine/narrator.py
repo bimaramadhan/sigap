@@ -9,15 +9,13 @@ Menggunakan Google Gemini AI — dua opsi:
      → Set GEMINI_API_KEY di .env
      → Daftar di: https://aistudio.google.com → Get API Key
      → Limit free tier: 15 req/menit, 1 juta token/hari
+     → Pakai SDK: google-genai (pip install google-genai)
 
   2. Vertex AI (berbayar, butuh GCP project + billing)
      → Set GCP_PROJECT_ID + gcloud auth application-default login
      → Dipakai otomatis jika GEMINI_API_KEY tidak ada
 
 Prioritas: Google AI Studio → Vertex AI → Template fallback
-
-Fallback: Jika keduanya tidak tersedia, pakai template engine berbasis
-          rules yang sudah fungsional dan informatif.
 """
 
 import os
@@ -29,10 +27,10 @@ from loguru import logger
 load_dotenv()
 
 # ── Config ────────────────────────────────────────────────────────────────────
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")          # Google AI Studio (gratis)
-GCP_PROJECT    = os.getenv("GCP_PROJECT_ID", "")           # Vertex AI (berbayar)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")           # Google AI Studio (gratis)
+GCP_PROJECT    = os.getenv("GCP_PROJECT_ID", "")            # Vertex AI (berbayar)
 GCP_REGION     = os.getenv("GCP_REGION", "asia-southeast2")
-GEMINI_MODEL   = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+GEMINI_MODEL   = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 DEMO_MODE      = os.getenv("DEMO_MODE", "false").lower() == "true"
 
 
@@ -82,25 +80,25 @@ Tulis briefing situasi untuk koordinator lapangan. Format:
 3. Satu kalimat penutup tentang sumber daya kritis yang dibutuhkan"""
 
 
-# ── Client Initializer ────────────────────────────────────────────────────────
+# ── Google AI Studio (google-genai SDK) ───────────────────────────────────────
 def _init_google_ai_studio():
     """
-    Inisialisasi Google AI Studio (gratis).
-    Butuh GEMINI_API_KEY dari https://aistudio.google.com
+    Inisialisasi Google AI Studio menggunakan SDK google-genai (bukan google-generativeai).
+    SDK baru: pip install google-genai
     """
-    if not GEMINI_API_KEY or GEMINI_API_KEY == "your-gemini-api-key":
+    if not GEMINI_API_KEY or GEMINI_API_KEY in ("your-gemini-api-key", ""):
+        logger.warning("GEMINI_API_KEY tidak ditemukan di .env → skip AI Studio")
         return None
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel(
-            model_name=GEMINI_MODEL,
-            system_instruction=SYSTEM_PROMPT,
-        )
+        from google import genai
+        client = genai.Client(api_key=GEMINI_API_KEY)
         logger.success(f"Gemini AI Studio initialized: {GEMINI_MODEL} (FREE tier)")
-        return ("aistudio", model)
+        return ("aistudio", client)
     except ImportError:
-        logger.warning("google-generativeai tidak terinstall. Jalankan: pip install google-generativeai")
+        logger.warning(
+            "Package google-genai tidak terinstall. "
+            "Jalankan: pip install google-genai"
+        )
         return None
     except Exception as e:
         logger.warning(f"Gemini AI Studio init gagal: {e}")
@@ -132,9 +130,9 @@ def _init_vertex_ai():
 def _init_gemini():
     """
     Coba inisialisasi Gemini — AI Studio dulu, Vertex AI sebagai fallback.
-    Return: (source_type, model) atau None jika keduanya gagal.
+    Return: (source_type, client_or_model) atau None jika keduanya gagal.
     """
-    # Prioritas 1: Google AI Studio (gratis)
+    # Prioritas 1: Google AI Studio (gratis, pakai google-genai SDK)
     result = _init_google_ai_studio()
     if result:
         return result
@@ -149,14 +147,25 @@ def _init_gemini():
 
 
 # ── Generation ────────────────────────────────────────────────────────────────
-def _generate_with_aistudio(model, prompt: str) -> str:
-    """Generate narasi menggunakan Google AI Studio."""
-    response = model.generate_content(
-        prompt,
-        generation_config={
-            "temperature":      0.4,
-            "max_output_tokens":512,
-        }
+def _generate_with_aistudio(client, prompt: str) -> str:
+    """
+    Generate narasi menggunakan Google AI Studio via google-genai SDK.
+    Ref: https://ai.google.dev/gemini-api/docs/text-generation
+
+    thinking_budget=0 menonaktifkan mode "thinking" pada model Gemini 3.x
+    sehingga token tidak habis untuk proses reasoning internal.
+    """
+    from google.genai import types
+
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            temperature=0.4,
+            max_output_tokens=512,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+        ),
+        contents=prompt,
     )
     return response.text.strip()
 
@@ -265,11 +274,11 @@ def generate_narasi(result, use_gemini: bool = True) -> dict:
     gemini_init = _init_gemini()
 
     if gemini_init:
-        source_type, model = gemini_init
+        source_type, client_or_model = gemini_init
         try:
             prompt = _build_prompt(result)
             if source_type == "aistudio":
-                narasi = _generate_with_aistudio(model, prompt)
+                narasi = _generate_with_aistudio(client_or_model, prompt)
                 logger.success(f"  Narasi Gemini AI Studio berhasil ({len(narasi)} chars)")
                 return {
                     "narasi": narasi,
@@ -277,7 +286,7 @@ def generate_narasi(result, use_gemini: bool = True) -> dict:
                     "model":  GEMINI_MODEL,
                 }
             else:
-                narasi = _generate_with_vertex(model, prompt)
+                narasi = _generate_with_vertex(client_or_model, prompt)
                 logger.success(f"  Narasi Vertex AI berhasil ({len(narasi)} chars)")
                 return {
                     "narasi": narasi,

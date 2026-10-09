@@ -19,10 +19,10 @@ export function useAnalysis(city) {
   const [errors,      setErrors]      = useState({})
   const [lastUpdated, setLastUpdated] = useState(null)
 
-  const fetchAlerts = useCallback(async () => {
+  const fetchAlerts = useCallback(async (c) => {
     setLoading(p => ({ ...p, alerts: true }))
     try {
-      setAlerts(await getAlerts(true))
+      setAlerts(await getAlerts(true, c))   // kirim city agar difilter per provinsi
       setErrors(p => ({ ...p, alerts: null }))
     } catch (e) {
       setErrors(p => ({ ...p, alerts: e.message }))
@@ -70,7 +70,7 @@ export function useAnalysis(city) {
   const refresh = useCallback(async () => {
     if (!city) return
     await Promise.all([
-      fetchAlerts(),
+      fetchAlerts(city),         // filter alerts per provinsi kota ini
       fetchWeather(city),
       fetchVulnerability(city),
       fetchNarasi(city),

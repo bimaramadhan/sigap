@@ -39,7 +39,8 @@ export default function NarasiPanel({ narasi, vulnerability, loading, isDark }) 
 
   if (!narasi) return null
 
-  const isGemini  = narasi.source === 'gemini'
+  const isGemini  = narasi.source === 'gemini' || narasi.source === 'gemini_aistudio' || narasi.source === 'gemini_vertex'
+  const isAIStudio = narasi.source === 'gemini_aistudio'
   const resources = vulnerability?.resource_needs
   const actions   = vulnerability?.priority_actions ?? []
 
@@ -65,7 +66,12 @@ export default function NarasiPanel({ narasi, vulnerability, loading, isDark }) 
               : 'bg-gray-100 border-gray-300 text-gray-600'
         )}>
           {isGemini ? <Zap size={11} /> : <FileText size={11} />}
-          {isGemini ? `Gemini ${narasi.model}` : 'Template Engine'}
+          {isAIStudio
+            ? `Gemini AI Studio (Free)`
+            : isGemini
+            ? `Gemini Vertex AI`
+            : 'Template Engine'
+          }
         </div>
         <span className={clsx('text-xs', isDark ? 'text-gray-600' : 'text-gray-400')}>
           {new Date(narasi.generated_at).toLocaleTimeString('id-ID', {

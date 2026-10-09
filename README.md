@@ -49,9 +49,11 @@ SIGAP mengisi jeda itu.
 │  BMKG Prakiraan Cuaca API ──────────────┤  ✅ Real-time, no auth   │
 │  InaRisk BNPB GIS ─────────────────────┘  ✅ Live, no auth         │
 │    • INDEKS_BAHAYA_BANJIR (100m raster)                             │
+│    • layer_risiko_banjir  (composite risk — BNPB final index)       │
+│    • SLR                  (Sea Level Rise, 30m)                     │
 │    • INDEKS_KAPASITAS_2021                                          │
 │    • INARISKPOP_2020                                                │
-│    • batas_administrasi (kecamatan polygons)                        │
+│    • batas_administrasi   (polygon kecamatan + kabupaten/kota)      │
 │                                                                     │
 │  Google Earth Engine ──────────────── ⚠️  Fallback, butuh auth     │
 └──────────────────────────────┬──────────────────────────────────────┘
@@ -76,10 +78,11 @@ SIGAP mengisi jeda itu.
 │                                                                     │
 │  FastAPI (api/main.py) — localhost:8080                             │
 │  React + Vite (frontend/) — localhost:3000                          │
-│    • Peta Leaflet dengan polygon kecamatan dari InaRisk BNPB        │
+│    • Peta OpenStreetMap + polygon kecamatan dari InaRisk BNPB       │
 │    • Dashboard koordinator BPBD                                     │
 │    • Form laporan lapangan (input TMA sungai, area genangan)        │
 │    • Dark/Light mode                                                │
+│    • Search 514 kota/kabupaten Indonesia                            │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -93,10 +96,20 @@ SIGAP mengisi jeda itu.
 |---|---|---|---|
 | **Peringatan dini cuaca** | BMKG Nowcast | `bmkg.go.id/alerts/nowcast/id` | ✅ Real-time |
 | **Prakiraan cuaca per kecamatan** | BMKG Prakiraan | `api.bmkg.go.id/publik/prakiraan-cuaca?adm4=...` | ✅ Update 2x/hari |
-| **Indeks Bahaya Banjir** | InaRisk BNPB | `gis.bnpb.go.id/server/rest/services/inarisk/INDEKS_BAHAYA_BANJIR` | ✅ Resolusi 100m |
+| **Indeks Bahaya Banjir** | InaRisk BNPB | `...INDEKS_BAHAYA_BANJIR` | ✅ 100m, seluruh Indonesia |
+| **Indeks Risiko Banjir (final)** | InaRisk BNPB | `...layer_risiko_banjir` | ✅ Composite BNPB, 100m |
+| **Sea Level Rise index** | InaRisk BNPB | `...SLR` | ✅ 30m, penting untuk kota pesisir |
 | **Indeks Kapasitas Daerah** | InaRisk BNPB | `...INDEKS_KAPASITAS_2021` | ✅ |
 | **Populasi 2020** | InaRisk BNPB | `...INARISKPOP_2020` | ✅ Jiwa per 100m² |
 | **Polygon kecamatan** | InaRisk BNPB | `...batas_administrasi/MapServer/3` | ✅ Seluruh Indonesia |
+| **Registry 514 kota** | InaRisk BNPB | `...batas_administrasi/MapServer/2` | ✅ Semua kabupaten/kota |
+
+> **`layer_risiko_banjir`** adalah indeks risiko **final** yang sudah dihitung BNPB
+> (hazard × vulnerability ÷ capacity). Lebih akurat daripada menghitung sendiri.
+> Dipakai sebagai `inarisk_score` utama menggantikan formula manual.
+
+> **`SLR` (Sea Level Rise)** sangat relevan untuk kota pesisir:
+> Semarang Utara = **1.0 (maksimum)** — konsisten dengan data subsidence yang diketahui.
 
 ### Membutuhkan Setup
 
@@ -190,13 +203,14 @@ Output Gemini (max 300 kata, bahasa Indonesia):
 |---|---|---|---|
 | BMKG alerts | `pipeline/bmkg_ingest.py` | ✅ Real-time | BMKG Nowcast API |
 | BMKG weather | `pipeline/bmkg_weather.py` | ✅ Live | BMKG Prakiraan Cuaca API |
-| InaRisk features | `pipeline/inarisk_loader.py` | ✅ Live | InaRisk BNPB GIS |
+| InaRisk features | `pipeline/inarisk_loader.py` | ✅ Live | InaRisk BNPB (6 layers) |
 | InaRisk polygons | `pipeline/inarisk_polygon.py` | ✅ On-demand | InaRisk batas_administrasi |
+| City registry | `pipeline/city_registry.py` | ✅ **514 kota Indonesia** | InaRisk batas_administrasi/2 |
 | EE loader | `pipeline/ee_loader.py` | ✅ Fallback only | Google Earth Engine |
 | Vulnerability scorer | `engine/vulnerability.py` | ✅ Aktif | InaRisk (primary) |
 | Flood report store | `engine/flood_report.py` | ✅ Aktif | Input manual BPBD |
 | Gemini narrator | `engine/narrator.py` | ✅ Fallback mode | Butuh GCP auth untuk live |
-| FastAPI | `api/main.py` | ✅ 12 endpoints | — |
+| FastAPI | `api/main.py` | ✅ **13 endpoints** | — |
 | POC runner | `run_poc.py` | ✅ Aktif | — |
 
 ### Frontend
@@ -230,8 +244,9 @@ sigap/
 ├── pipeline/                      # Data ingestion
 │   ├── bmkg_ingest.py             # ✅ BMKG alert real-time (nowcast + CAP)
 │   ├── bmkg_weather.py            # ✅ BMKG prakiraan cuaca per kecamatan
-│   ├── inarisk_loader.py          # ✅ InaRisk BNPB: hazard, capacity, population
+│   ├── inarisk_loader.py          # ✅ InaRisk BNPB: 6 layers (hazard, risk, SLR, dll)
 │   ├── inarisk_polygon.py         # ✅ InaRisk polygon kecamatan + hazard value
+│   ├── city_registry.py           # ✅ Registry 514 kab/kota Indonesia (InaRisk)
 │   └── ee_loader.py               # ✅ Earth Engine (fallback)
 │
 ├── engine/                        # Core AI logic
@@ -240,7 +255,7 @@ sigap/
 │   └── flood_report.py            # ✅ In-memory store laporan lapangan BPBD
 │
 ├── api/
-│   └── main.py                    # ✅ FastAPI 12 endpoints (v0.3.0)
+│   └── main.py                    # ✅ FastAPI 13 endpoints (v0.3.0)
 │
 ├── frontend/
 │   ├── src/
@@ -248,7 +263,7 @@ sigap/
 │   │   ├── components/
 │   │   │   ├── Header.jsx         # City selector + theme toggle
 │   │   │   ├── WeatherBar.jsx     # Strip cuaca real-time BMKG
-│   │   │   ├── MapView.jsx        # Leaflet + InaRisk polygon overlay
+│   │   │   ├── MapView.jsx        # OpenStreetMap + InaRisk polygon overlay
 │   │   │   ├── AlertPanel.jsx     # BMKG alerts
 │   │   │   ├── VulnerabilityCard.jsx
 │   │   │   ├── NarasiPanel.jsx
@@ -277,16 +292,19 @@ sigap/
 │       └── template_kejadian.md
 │
 ├── data/
-│   └── cache/                     # Auto-generated (gitignored)
+│   ├── cache/                     # Auto-generated (gitignored)
+│   └── registry/                  # Auto-generated (gitignored)
+│       └── cities.json            # 514 kab/kota Indonesia dari InaRisk
 │
 ├── run_poc.py                     # Single entry point
 ├── test_bmkg_live.py
 ├── test_weather_integration.py
 ├── test_inarisk_integration.py
+├── test_registry.py               # Test city registry
 ├── extract_pdf.py                 # Utility: ekstrak teks dari PDF
 ├── requirements.txt
 ├── .env.example
-├── ROADMAP.md                     # Rencana pengembangan lanjutan
+├── ROADMAP.md
 └── README.md
 ```
 
@@ -376,7 +394,8 @@ Backend berjalan di `http://localhost:8080`. Dokumentasi interaktif di `/docs`.
 | Method | Endpoint | Fungsi |
 |---|---|---|
 | `GET` | `/` | Health check + version |
-| `GET` | `/cities` | List kota yang didukung |
+| `GET` | `/cities` | List 4 kota yang didukung penuh |
+| `GET` | `/cities/search?q={query}` | **Cari dari 514 kota Indonesia** |
 
 ### Data (real-time)
 
@@ -384,7 +403,7 @@ Backend berjalan di `http://localhost:8080`. Dokumentasi interaktif di `/docs`.
 |---|---|---|---|
 | `GET` | `/alerts` | BMKG Nowcast | 30 menit |
 | `GET` | `/weather/{city}` | BMKG Prakiraan Cuaca | 60 menit |
-| `GET` | `/features/{city}` | InaRisk BNPB | 24 jam |
+| `GET` | `/features/{city}` | InaRisk BNPB (6 layers) | 24 jam |
 | `GET` | `/flood-polygons/{city}` | InaRisk batas_administrasi | 7 hari |
 | `GET` | `/flood-rivers/{city}` | Static data | — |
 
@@ -410,14 +429,35 @@ Backend berjalan di `http://localhost:8080`. Dokumentasi interaktif di `/docs`.
 
 | Kota | Province | Karakteristik Risiko |
 |---|---|---|
-| **Semarang** | Jawa Tengah | Rob (elevasi -2m), banjir bandang dari hulu |
-| **Bekasi** | Jawa Barat | Bantaran Kali Bekasi, kepadatan tinggi |
-| **Jakarta** | DKI Jakarta | Pesisir (-3.5m), 48% area berpotensi banjir |
+| **Semarang** | Jawa Tengah | Rob (elevasi -2m), SLR tinggi, banjir bandang dari hulu |
+| **Bekasi** | Jawa Barat | Bantaran Kali Bekasi, kepadatan tertinggi |
+| **Jakarta** | DKI Jakarta | Pesisir (-3.5m), 48% area berpotensi banjir, SLR kritis |
 | **Surabaya** | Jawa Timur | Pesisir utara (Kenjeran, Semampir), Kali Mas |
 
-> **Menambah kota baru:** Saat ini perlu update manual di 8+ file.
-> Lihat [ROADMAP.md](ROADMAP.md) untuk rencana `city_registry.py` yang
-> akan memungkinkan kota apapun di Indonesia tanpa perubahan kode.
+### Mencari Kota Lain
+
+`city_registry.py` sudah tersedia dengan **514 kabupaten/kota** seluruh Indonesia.
+
+```powershell
+# Build registry (sekali, <1 detik)
+python pipeline/city_registry.py --build
+
+# Search
+python pipeline/city_registry.py --search "bandung"
+# → Bandung, Kota Bandung, Bandung Barat
+
+python pipeline/city_registry.py --search "jawa timur"
+# → Bangkalan, Banyuwangi, Blitar, ... (38 kota)
+```
+
+Atau via API:
+```
+GET /cities/search?q=makassar
+GET /cities/search?q=jawa+tengah&limit=20
+```
+
+> **Saat ini** pipeline analitik (InaRisk query, vulnerability scorer) masih perlu
+> CITY_BOUNDS hardcoded. Migrasi ke dynamic lookup ada di [ROADMAP.md](ROADMAP.md).
 
 ---
 
@@ -460,8 +500,8 @@ Lihat [ROADMAP.md](ROADMAP.md) untuk detail lengkap.
 
 ### Jangka Menengah (pasca-hackathon)
 
-- [ ] `city_registry.py` — support semua 514 kabupaten/kota Indonesia
-- [ ] Search/autocomplete kota di frontend
+- [ ] Migrasi ke dynamic city lookup via `city_registry.py` (registry sudah ada — 514 kota)
+- [ ] Search/autocomplete kota di frontend (backend `/cities/search` sudah ada)
 - [ ] Banjir Log database (PostgreSQL/Supabase)
 - [ ] Re-train threshold dari data historis BNPB
 - [ ] Deploy ke Cloud Run
@@ -487,8 +527,10 @@ Lihat [ROADMAP.md](ROADMAP.md) untuk detail lengkap.
 *Terakhir diupdate: September 2026*
 
 **Data real yang sudah terbukti berjalan:**
-- BMKG: 17 alert aktif (24 Sep 2026), real-time tanpa setup
-- InaRisk Semarang: flood_ratio=46.4%, score=49.8 (live dari BNPB)
-- Prakiraan cuaca: Semarang Cerah Berawan 0mm/12jam (29 Sep 2026)
-- Polygon kecamatan: 22 kecamatan Semarang dengan nilai bahaya riil
-  (Semarang Barat: 0.975 = SANGAT TINGGI)
+- BMKG: 17 alert aktif (24 Sep), real-time tanpa setup
+- InaRisk Semarang: flood_ratio=46.4%, inarisk_score=0.628 (dari layer_risiko_banjir BNPB)
+- InaRisk SLR: Semarang Utara = 1.0 (max) — konfirmasi subsidence
+- Prakiraan cuaca: 5 kecamatan Semarang, 0mm/12jam (29 Sep, cerah)
+- Polygon kecamatan: 22 kecamatan Semarang — Semarang Barat hazard 0.975
+- City registry: 514 kab/kota, 34 provinsi, build <1 detik
+- Peta: OpenStreetMap (bebas API key, dark mode via CSS filter)

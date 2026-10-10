@@ -127,7 +127,7 @@ export default function App() {
     setTimeout(() => refresh(), 300)
   }, [refresh])
 
-  const { rivers, reports, submit: submitReport, clear: clearReports }
+  const { villages, reports, kecamatanBoosts, submit: submitReport, clear: clearReports }
     = useFloodReports(selectedCity, onReportSuccess)
 
   // ── Toast helper ───────────────────────────────────────────────────────────
@@ -222,7 +222,7 @@ export default function App() {
           activeTab !== 'map' && 'hidden lg:flex'
         )}>
           <div className="flex-1 p-3" style={{ minHeight: 0, height: 0 }}>
-            <MapView selectedCity={selectedCity} />
+            <MapView selectedCity={selectedCity} kecamatanBoosts={kecamatanBoosts} />
           </div>
 
           {/* Status strip */}
@@ -302,7 +302,7 @@ export default function App() {
                 <SectionTitle icon={Droplets} title="Laporan Lapangan BPBD" />
                 <FloodInputPanel
                   city={selectedCity}
-                  rivers={rivers}
+                  villages={villages}
                   reports={reports}
                   isDark={isDark}
                   onSubmit={handleSubmitReport}

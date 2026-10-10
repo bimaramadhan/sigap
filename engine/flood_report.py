@@ -1,15 +1,11 @@
 """
 engine/flood_report.py
 ──────────────────────
-In-memory store untuk laporan lapangan dari koordinator BPBD.
+Penyimpanan laporan lapangan dari koordinator BPBD.
 
-Ini menggantikan keterbatasan data live banjir yang tidak tersedia
-via public API. Koordinator BPBD input langsung ke SIGAP:
-  - Level sungai (TMA) saat ini
-  - Area yang sudah tergenang
-
-Data ini kemudian digunakan sebagai boost ke vulnerability score,
-membuat sistem responsif terhadap kondisi aktual di lapangan.
+Koordinator memilih satu desa/kelurahan. Kecamatan induk diambil dari
+kode wilayah, bukan dari input bebas. Laporan ini menjadi boost ke
+vulnerability score kota dan ke kecamatan tempat desa itu berada.
 
 Sesuai Pasal 23 Peraturan BNPB No.2/2024 yang mewajibkan BPBD
 memberikan umpan balik kondisi lapangan ke sistem peringatan dini.
@@ -19,25 +15,22 @@ import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 from loguru import logger
+
+from engine.wilayah import resolve_village
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DATA_DIR   = Path("data")
 STORE_FILE = DATA_DIR / "flood_reports.json"
 
-# Boost ke vulnerability score berdasarkan level sungai
-RIVER_LEVEL_BOOST = {
-    "awas":    25,   # TMA di atas batas bahaya
-    "siaga":   15,   # TMA di batas siaga
-    "waspada":  8,   # TMA mendekati batas waspada
-    "normal":   0,   # TMA normal
+# Boost ke vulnerability score berdasarkan status banjir desa
+FLOOD_LEVEL_BOOST = {
+    "awas":    25,
+    "siaga":   15,
+    "waspada":  8,
+    "normal":   0,
 }
-
-# Tambahan boost per area genangan yang dilaporkan (max 15 poin total)
-FLOODED_AREA_BOOST_PER_AREA = 3
-FLOODED_AREA_MAX_BOOST      = 15
 
 # Label lengkap per level (sesuai BNPB No.2/2024)
 LEVEL_LABELS = {
@@ -47,41 +40,7 @@ LEVEL_LABELS = {
     "awas":     {"label": "🔴 Awas",     "color": "red"},
 }
 
-# Sungai kritis per kota (untuk dropdown di frontend)
-RIVERS_BY_CITY = {
-    "semarang": [
-        "Sungai Banjirkanal Barat",
-        "Sungai Banjirkanal Timur",
-        "Sungai Beringin",
-        "Sungai Silandak",
-        "Sungai Plumbon",
-        "Kali Garang",
-    ],
-    "bekasi": [
-        "Kali Bekasi",
-        "Kali Cikeas",
-        "Kali Cileungsi",
-        "Kali Sunter",
-        "Saluran Tarum Barat",
-    ],
-    "jakarta": [
-        "Kali Ciliwung",
-        "Kali Pesanggrahan",
-        "Kali Angke",
-        "Kali Sunter",
-        "Banjir Kanal Barat",
-        "Banjir Kanal Timur",
-        "Kali Krukut",
-    ],
-    "surabaya": [
-        "Kali Mas",
-        "Kali Surabaya",
-        "Kali Wonokromo",
-        "Kali Kenjeran",
-        "Kali Lamong",
-        "Kali Kedurus",
-    ],
-}
+REPORT_WINDOW_SECONDS = 12 * 3600
 
 
 # ── In-Memory Store ───────────────────────────────────────────────────────────
@@ -111,147 +70,160 @@ def _save_to_disk() -> None:
         json.dump(_store, f, ensure_ascii=False, indent=2)
 
 
-# Load saat module diimport
 _load_from_disk()
 
 
-# ── Data Models ───────────────────────────────────────────────────────────────
-def _make_report(
-    city:            str,
-    reporter:        str,
-    river_name:      str,
-    water_level_cm:  int,
-    river_level:     str,            # normal / waspada / siaga / awas
-    flooded_areas:   list[dict],     # [{"name": "RT 04 Semarang Utara", "depth_cm": 50, "est_affected": 200}]
-    notes:           str = "",
-) -> dict:
-    """Buat satu objek flood report terstandarisasi."""
-    river_level = river_level.lower()
-    if river_level not in RIVER_LEVEL_BOOST:
-        river_level = "normal"
-
-    boost = _calculate_boost(river_level, flooded_areas)
-
-    return {
-        "id":              f"{city}_{int(time.time() * 1000)}",
-        "city":            city,
-        "reported_at":     datetime.now(timezone.utc).isoformat(),
-        "reporter":        reporter or "Koordinator BPBD",
-        "river_name":      river_name,
-        "water_level_cm":  water_level_cm,
-        "river_level":     river_level,
-        "river_level_label": LEVEL_LABELS[river_level]["label"],
-        "flooded_areas":   flooded_areas or [],
-        "notes":           notes,
-        "boost_score":     boost["total"],
-        "boost_breakdown": boost,
-    }
+def _normalize_level(level: str) -> str:
+    level = (level or "normal").lower()
+    if level not in FLOOD_LEVEL_BOOST:
+        return "normal"
+    return level
 
 
-def _calculate_boost(river_level: str, flooded_areas: list[dict]) -> dict:
-    """
-    Hitung boost score dari laporan lapangan.
-
-    River level boost: berdasarkan status TMA sungai
-    Area boost: +3 per area genangan, max 15 poin
-    Total max: RIVER_LEVEL_BOOST[max] + FLOODED_AREA_MAX_BOOST = 25 + 15 = 40
-    (akan di-cap oleh vulnerability.py agar total boost max 30)
-    """
-    river_boost = RIVER_LEVEL_BOOST.get(river_level, 0)
-    area_boost  = min(
-        len(flooded_areas) * FLOODED_AREA_BOOST_PER_AREA,
-        FLOODED_AREA_MAX_BOOST
+def _calculate_boost(flood_level: str, desa_name: str, kecamatan: str) -> dict:
+    """Boost hanya dari status banjir desa. Tidak ada tambahan per area genangan."""
+    level_boost = FLOOD_LEVEL_BOOST.get(flood_level, 0)
+    reason = (
+        f"Desa {desa_name}, Kec. {kecamatan} — {flood_level.upper()} (+{level_boost})"
     )
-    total_boost = river_boost + area_boost
-
     return {
-        "total":       total_boost,
-        "river_boost": river_boost,
-        "area_boost":  area_boost,
-        "river_level": river_level,
-        "areas_count": len(flooded_areas),
-        "reason": (
-            f"TMA {river_level.upper()} (+{river_boost})"
-            + (f" + {len(flooded_areas)} area genangan (+{area_boost})" if area_boost > 0 else "")
-        ),
+        "total":       level_boost,
+        "level_boost": level_boost,
+        "flood_level": flood_level,
+        "reason":      reason,
     }
+
+
+def _public_report(report: dict) -> dict:
+    """Bentuk laporan yang dikirim ke API, termasuk laporan sungai yang lama."""
+    level = _normalize_level(report.get("flood_level") or report.get("river_level") or "normal")
+    return {
+        "id":                 report.get("id", ""),
+        "city":               report.get("city", ""),
+        "reported_at":        report.get("reported_at", ""),
+        "reporter":           report.get("reporter") or "Koordinator BPBD",
+        "desa_kode":          report.get("desa_kode") or "",
+        "desa_name":          report.get("desa_name") or report.get("river_name") or "",
+        "kecamatan":          report.get("kecamatan") or "",
+        "kecamatan_kode":     report.get("kecamatan_kode") or "",
+        "flood_level":        level,
+        "flood_level_label":  report.get("flood_level_label") or report.get("river_level_label") or LEVEL_LABELS[level]["label"],
+        "notes":              report.get("notes") or "",
+        "boost_score":        float(report.get("boost_score") or 0),
+        "boost_breakdown":    report.get("boost_breakdown") or {},
+    }
+
+
+def _recent_reports(city: str) -> list[dict]:
+    """Laporan dalam 12 jam terakhir, terbaru dulu."""
+    reports = _store.get(city.lower(), [])
+    cutoff  = time.time() - REPORT_WINDOW_SECONDS
+    recent  = []
+    for report in reports:
+        try:
+            ts = datetime.fromisoformat(report["reported_at"]).timestamp()
+        except Exception:
+            continue
+        if ts > cutoff:
+            recent.append(report)
+    return recent
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
 def add_report(
-    city:           str,
-    reporter:       str,
-    river_name:     str,
-    water_level_cm: int,
-    river_level:    str,
-    flooded_areas:  list[dict],
-    notes:          str = "",
+    city:        str,
+    reporter:    str,
+    desa_kode:   str,
+    flood_level: str,
+    notes:       str = "",
 ) -> dict:
     """
-    Tambah laporan banjir baru untuk satu kota.
-    Return: report yang baru dibuat.
+    Tambah laporan banjir untuk satu desa.
+    Kecamatan diisi dari katalog wilayah. Desa di luar kota ditolak.
     """
     city = city.lower()
-    report = _make_report(
-        city, reporter, river_name,
-        water_level_cm, river_level,
-        flooded_areas, notes,
-    )
+    village = resolve_village(city, desa_kode)
+    flood_level = _normalize_level(flood_level)
+    boost = _calculate_boost(flood_level, village["nama"], village["kecamatan"])
 
-    if city not in _store:
-        _store[city] = []
+    report = {
+        "id":                 f"{city}_{int(time.time() * 1000)}",
+        "city":               city,
+        "reported_at":        datetime.now(timezone.utc).isoformat(),
+        "reporter":           reporter or "Koordinator BPBD",
+        "desa_kode":          village["kode"],
+        "desa_name":          village["nama"],
+        "kecamatan":          village["kecamatan"],
+        "kecamatan_kode":     village["kecamatan_kode"],
+        "flood_level":        flood_level,
+        "flood_level_label":  LEVEL_LABELS[flood_level]["label"],
+        "notes":              notes,
+        "boost_score":        boost["total"],
+        "boost_breakdown":    boost,
+    }
 
-    # Simpan hanya 20 laporan terakhir per kota (untuk POC)
+    _store.setdefault(city, [])
     _store[city].insert(0, report)
     _store[city] = _store[city][:20]
 
     _save_to_disk()
     logger.success(
-        f"  Field report: {city} | {river_name} {water_level_cm}cm "
-        f"({river_level.upper()}) | boost=+{report['boost_score']}"
+        f"  Field report: {city} | {village['nama']} ({village['kecamatan']}) "
+        f"{flood_level.upper()} | boost=+{report['boost_score']}"
     )
-    return report
+    return _public_report(report)
 
 
 def get_reports(city: str, limit: int = 10) -> list[dict]:
     """Ambil laporan terbaru untuk satu kota."""
     city = city.lower()
-    return _store.get(city, [])[:limit]
+    return [_public_report(r) for r in _store.get(city, [])[:limit]]
 
 
 def get_latest_boost(city: str) -> dict:
     """
-    Ambil boost score terbaru dari laporan lapangan.
-    Hanya menggunakan laporan dalam 12 jam terakhir.
-
-    Return: dict dengan boost_score dan reason.
+    Boost tertinggi dari laporan 12 jam terakhir untuk seluruh kota.
+    Bukan jumlah semua kecamatan.
     """
-    city       = city.lower()
-    reports    = _store.get(city, [])
-    cutoff     = time.time() - 12 * 3600  # 12 jam
-
-    recent = []
-    for r in reports:
-        try:
-            ts = datetime.fromisoformat(r["reported_at"]).timestamp()
-            if ts > cutoff:
-                recent.append(r)
-        except Exception:
-            continue
-
+    recent = _recent_reports(city)
     if not recent:
         return {"boost_score": 0, "reason": "", "report_count": 0}
 
-    # Ambil boost tertinggi dari laporan terbaru (bukan kumulatif)
-    best  = max(recent, key=lambda r: r["boost_score"])
-    total = best["boost_score"]
+    best  = max(recent, key=lambda r: r.get("boost_score") or 0)
+    total = best.get("boost_score") or 0
+    reason = (best.get("boost_breakdown") or {}).get("reason", "")
 
     return {
-        "boost_score":  total,
-        "reason":       best["boost_breakdown"]["reason"],
-        "report_count": len(recent),
-        "latest_report": best,
+        "boost_score":   total,
+        "reason":        reason,
+        "report_count":  len(recent),
+        "latest_report": _public_report(best),
     }
+
+
+def get_kecamatan_boosts(city: str) -> dict[str, dict]:
+    """
+    Boost tertinggi per nama kecamatan pada jendela 12 jam yang sama.
+    Kunci adalah nama kecamatan supaya bisa dicocokkan ke WADMKC.
+    Laporan lama tanpa kecamatan diabaikan.
+    """
+    best_by_name: dict[str, dict] = {}
+    for report in _recent_reports(city):
+        name = (report.get("kecamatan") or "").strip()
+        if not name:
+            continue
+        score = float(report.get("boost_score") or 0)
+        current = best_by_name.get(name)
+        if current is not None and score <= current["boost_score"]:
+            continue
+        level = _normalize_level(report.get("flood_level") or report.get("river_level") or "normal")
+        best_by_name[name] = {
+            "boost_score": score,
+            "flood_level": level,
+            "desa_name":   report.get("desa_name") or "",
+            "reason":      (report.get("boost_breakdown") or {}).get("reason", ""),
+        }
+    return best_by_name
 
 
 def clear_reports(city: str) -> int:
@@ -262,8 +234,3 @@ def clear_reports(city: str) -> int:
     _save_to_disk()
     logger.info(f"Cleared {count} reports for {city}")
     return count
-
-
-def get_rivers(city: str) -> list[str]:
-    """Daftar sungai kritis untuk kota tertentu."""
-    return RIVERS_BY_CITY.get(city.lower(), [])

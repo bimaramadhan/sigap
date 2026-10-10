@@ -331,33 +331,42 @@ export const MOCK_FLOOD_ZONES = {
 }
 
 
-// ── Flood Report Mock Data (v3) ───────────────────────────────────────────────
+// ── Flood Report Mock Data ────────────────────────────────────────────────────
+// Cuplikan kecil dari wilayah.sql. Mode live memakai seluruh desa kota itu.
 
-// Daftar sungai kritis per kota (untuk dropdown form)
-export const MOCK_RIVERS = {
+export const MOCK_VILLAGES = {
   semarang: [
-    'Sungai Banjirkanal Barat',
-    'Sungai Banjirkanal Timur',
-    'Sungai Beringin',
-    'Sungai Silandak',
-    'Sungai Plumbon',
-    'Kali Garang',
+    {
+      kecamatan: 'Semarang Tengah', kecamatan_kode: '33.74.01', kota_administrasi: 'Kota Semarang',
+      villages: [{ kode: '33.74.01.1001', nama: 'Miroto' }],
+    },
+    {
+      kecamatan: 'Semarang Utara', kecamatan_kode: '33.74.02', kota_administrasi: 'Kota Semarang',
+      villages: [
+        { kode: '33.74.02.1001', nama: 'Bandarharjo' },
+        { kode: '33.74.02.1008', nama: 'Tanjung Mas' },
+      ],
+    },
   ],
   bekasi: [
-    'Kali Bekasi',
-    'Kali Cikeas',
-    'Kali Cileungsi',
-    'Kali Sunter',
-    'Saluran Tarum Barat',
+    {
+      kecamatan: 'Bekasi Barat', kecamatan_kode: '32.75.02', kota_administrasi: 'Kota Bekasi',
+      villages: [{ kode: '32.75.02.1001', nama: 'Bintara' }],
+    },
+    {
+      kecamatan: 'Bekasi Utara', kecamatan_kode: '32.75.03', kota_administrasi: 'Kota Bekasi',
+      villages: [{ kode: '32.75.03.1006', nama: 'Harapanjaya' }],
+    },
   ],
   jakarta: [
-    'Kali Ciliwung',
-    'Kali Pesanggrahan',
-    'Kali Angke',
-    'Kali Sunter',
-    'Banjir Kanal Barat',
-    'Banjir Kanal Timur',
-    'Kali Krukut',
+    {
+      kecamatan: 'Gambir', kecamatan_kode: '31.71.01', kota_administrasi: 'Kota Administrasi Jakarta Pusat',
+      villages: [{ kode: '31.71.01.1001', nama: 'Gambir' }],
+    },
+    {
+      kecamatan: 'Penjaringan', kecamatan_kode: '31.72.01', kota_administrasi: 'Kota Administrasi Jakarta Utara',
+      villages: [{ kode: '31.72.01.1001', nama: 'Penjaringan' }],
+    },
   ],
 }
 
@@ -379,32 +388,53 @@ export function getMockReports(city) {
   return _mockReportStore[city] ?? []
 }
 
+function findMockVillage(city, kode) {
+  for (const group of MOCK_VILLAGES[city] ?? []) {
+    const village = group.villages.find(v => v.kode === kode)
+    if (village) {
+      return {
+        ...village,
+        kecamatan: group.kecamatan,
+        kecamatan_kode: group.kecamatan_kode,
+      }
+    }
+  }
+  return null
+}
+
 export function addMockReport(data) {
   const city   = data.city?.toLowerCase() ?? 'semarang'
   const levels = { normal: 0, waspada: 8, siaga: 15, awas: 25 }
-  const riverBoost = levels[data.river_level] ?? 0
-  const areaBoost  = Math.min((data.flooded_areas?.length ?? 0) * 3, 15)
-  const boost      = riverBoost + areaBoost
+  const level  = data.flood_level ?? 'normal'
+  const boost  = levels[level] ?? 0
+  const village = findMockVillage(city, data.desa_kode) ?? {
+    kode: data.desa_kode,
+    nama: data.desa_kode,
+    kecamatan: '',
+    kecamatan_kode: '',
+  }
 
   const LABELS = { normal: '🟢 Normal', waspada: '🟡 Waspada', siaga: '🟠 Siaga', awas: '🔴 Awas' }
+  const reason = `Desa ${village.nama}, Kec. ${village.kecamatan} — ${level.toUpperCase()} (+${boost})`
 
   const report = {
     id:                `${city}_${Date.now()}`,
     city,
     reported_at:       new Date().toISOString(),
     reporter:          data.reporter || 'Koordinator BPBD',
-    river_name:        data.river_name,
-    water_level_cm:    data.water_level_cm,
-    river_level:       data.river_level,
-    river_level_label: LABELS[data.river_level] ?? '🟢 Normal',
-    flooded_areas:     data.flooded_areas ?? [],
+    desa_kode:         village.kode,
+    desa_name:         village.nama,
+    kecamatan:         village.kecamatan,
+    kecamatan_kode:    village.kecamatan_kode,
+    flood_level:       level,
+    flood_level_label: LABELS[level] ?? '🟢 Normal',
     notes:             data.notes ?? '',
     boost_score:       boost,
     boost_breakdown: {
       total:       boost,
-      river_boost: riverBoost,
-      area_boost:  areaBoost,
-      reason:      `TMA ${data.river_level?.toUpperCase()} (+${riverBoost}) + ${data.flooded_areas?.length ?? 0} area (+${areaBoost})`,
+      level_boost: boost,
+      flood_level: level,
+      reason,
     },
   }
 
@@ -524,13 +554,15 @@ MOCK_FLOOD_ZONES.surabaya = [
   { id: 'sby-bubutan',   name: 'Bubutan',          risk: 'low',    coords: [[-7.24,112.72],[-7.24,112.74],[-7.27,112.74],[-7.27,112.72]], pop_est: 120000, note: 'Bantaran Kali Mas' },
 ]
 
-MOCK_RIVERS.surabaya = [
-  'Kali Mas',
-  'Kali Surabaya',
-  'Kali Wonokromo',
-  'Kali Kenjeran',
-  'Kali Lamong',
-  'Kali Kedurus',
+MOCK_VILLAGES.surabaya = [
+  {
+    kecamatan: 'Semampir', kecamatan_kode: '35.78.16', kota_administrasi: 'Kota Surabaya',
+    villages: [{ kode: '35.78.16.1004', nama: 'Ujung' }],
+  },
+  {
+    kecamatan: 'Kenjeran', kecamatan_kode: '35.78.17', kota_administrasi: 'Kota Surabaya',
+    villages: [{ kode: '35.78.17.1003', nama: 'Bulak Banteng' }],
+  },
 ]
 
 MOCK_FLOOD_REPORTS.surabaya = { city: 'surabaya', report_count: 0, latest_boost: 0, boost_reason: '', reports: [] }

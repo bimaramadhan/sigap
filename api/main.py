@@ -14,7 +14,7 @@ Endpoints:
   GET  /analyze/{city}            Full pipeline
   POST /flood-report              Submit laporan lapangan dari BPBD [BARU]
   GET  /flood-reports/{city}      Ambil laporan lapangan terbaru [BARU]
-  GET  /flood-rivers/{city}       Daftar sungai kritis per kota [BARU]
+  GET  /flood-villages/{city}     Desa/kelurahan per kecamatan [BARU]
   DELETE /flood-reports/{city}    Hapus semua laporan (reset demo) [BARU]
 
 Jalankan:
@@ -150,45 +150,63 @@ class FullAnalysisResponse(BaseModel):
     is_sample_data: bool
 
 
-# ── Flood Report Models (BARU) ────────────────────────────────────────────────
-
-class FloodedArea(BaseModel):
-    name:         str            # "RT 04 Kelurahan Semarang Utara"
-    depth_cm:     int            # kedalaman genangan cm
-    est_affected: int = 0        # estimasi jiwa terdampak
-
+# ── Flood Report Models ───────────────────────────────────────────────────────
 
 class FloodReportRequest(BaseModel):
-    city:           str
-    reporter:       str = "Koordinator BPBD"
-    river_name:     str
-    water_level_cm: int
-    river_level:    str          # normal / waspada / siaga / awas
-    flooded_areas:  list[FloodedArea] = []
-    notes:          str = ""
+    city:        str
+    reporter:    str = "Koordinator BPBD"
+    desa_kode:   str
+    flood_level: str          # normal / waspada / siaga / awas
+    notes:       str = ""
 
 
 class FloodReportResponse(BaseModel):
-    id:                str
-    city:              str
-    reported_at:       str
-    reporter:          str
-    river_name:        str
-    water_level_cm:    int
-    river_level:       str
-    river_level_label: str
-    flooded_areas:     list[dict]
-    notes:             str
-    boost_score:       float
-    boost_breakdown:   dict
+    id:                 str
+    city:               str
+    reported_at:        str
+    reporter:           str
+    desa_kode:          str
+    desa_name:          str
+    kecamatan:          str
+    kecamatan_kode:     str
+    flood_level:        str
+    flood_level_label:  str
+    notes:              str
+    boost_score:        float
+    boost_breakdown:    dict
+
+
+class KecamatanBoost(BaseModel):
+    boost_score: float
+    flood_level: str
+    desa_name:   str
+    reason:      str
 
 
 class FloodReportsListResponse(BaseModel):
-    city:         str
-    report_count: int
-    latest_boost: float
-    boost_reason: str
-    reports:      list[FloodReportResponse]
+    city:              str
+    report_count:      int
+    latest_boost:      float
+    boost_reason:      str
+    reports:           list[FloodReportResponse]
+    kecamatan_boosts:  dict[str, KecamatanBoost] = {}
+
+
+class VillageItem(BaseModel):
+    kode: str
+    nama: str
+
+
+class VillageGroup(BaseModel):
+    kecamatan:         str
+    kecamatan_kode:    str
+    kota_administrasi: str = ""
+    villages:          list[VillageItem]
+
+
+class FloodVillagesResponse(BaseModel):
+    city:   str
+    groups: list[VillageGroup]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -581,26 +599,25 @@ def submit_flood_report(body: FloodReportRequest):
     """
     Submit laporan lapangan dari koordinator BPBD.
 
-    Laporan ini langsung mempengaruhi vulnerability score kota.
-    Berdasarkan Pasal 23 Peraturan BNPB No.2/2024 — BPBD wajib
-    memberikan umpan balik kondisi lapangan ke sistem peringatan dini.
+    Satu desa per laporan. Kecamatan diisi dari kode wilayah.
+    Laporan menaikkan skor kota dan menandai kecamatan induk di peta.
 
-    river_level: "normal" | "waspada" | "siaga" | "awas"
+    flood_level: "normal" | "waspada" | "siaga" | "awas"
     """
     city = _validate_city(body.city)
+    from engine.flood_report import add_report
+    from engine.wilayah import VillageNotInCity
     try:
-        from engine.flood_report import add_report
-
         report = add_report(
-            city           = city,
-            reporter       = body.reporter,
-            river_name     = body.river_name,
-            water_level_cm = body.water_level_cm,
-            river_level    = body.river_level,
-            flooded_areas  = [a.dict() for a in body.flooded_areas],
-            notes          = body.notes,
+            city        = city,
+            reporter    = body.reporter,
+            desa_kode   = body.desa_kode,
+            flood_level = body.flood_level,
+            notes       = body.notes,
         )
         return FloodReportResponse(**report)
+    except VillageNotInCity as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error submitting flood report: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -614,29 +631,30 @@ def get_flood_reports(city: str, limit: int = Query(10, ge=1, le=50)):
     """
     city = _validate_city(city)
     try:
-        from engine.flood_report import get_reports, get_latest_boost
+        from engine.flood_report import get_kecamatan_boosts, get_latest_boost, get_reports
 
         reports = get_reports(city, limit=limit)
         boost   = get_latest_boost(city)
 
         return FloodReportsListResponse(
-            city         = city,
-            report_count = len(reports),
-            latest_boost = boost["boost_score"],
-            boost_reason = boost["reason"],
-            reports      = [FloodReportResponse(**r) for r in reports],
+            city              = city,
+            report_count      = len(reports),
+            latest_boost      = boost["boost_score"],
+            boost_reason      = boost["reason"],
+            reports           = [FloodReportResponse(**r) for r in reports],
+            kecamatan_boosts  = get_kecamatan_boosts(city),
         )
     except Exception as e:
         logger.error(f"Error getting flood reports: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/flood-rivers/{city}", tags=["Field Reports"])
-def get_flood_rivers(city: str):
-    """Daftar sungai kritis untuk dropdown input laporan."""
+@app.get("/flood-villages/{city}", response_model=FloodVillagesResponse, tags=["Field Reports"])
+def get_flood_villages(city: str):
+    """Desa/kelurahan kota ini, dikelompokkan per kecamatan."""
     city = _validate_city(city)
-    from engine.flood_report import get_rivers
-    return {"city": city, "rivers": get_rivers(city)}
+    from engine.wilayah import get_villages
+    return FloodVillagesResponse(city=city, groups=get_villages(city))
 
 
 @app.delete("/flood-reports/{city}", tags=["Field Reports"])

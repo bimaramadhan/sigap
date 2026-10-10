@@ -37,11 +37,6 @@ const MOCK_STYLE = {
   medium: { color: '#f97316', fillColor: '#f97316', fillOpacity: 0.22, weight: 1.5 },
   low:    { color: '#eab308', fillColor: '#eab308', fillOpacity: 0.15, weight: 1 },
 }
-const MOCK_HOVER = {
-  high:   { fillOpacity: 0.55 },
-  medium: { fillOpacity: 0.45 },
-  low:    { fillOpacity: 0.35 },
-}
 
 // Risk level labels sesuai BNPB No.3/2025
 const RISK_LABELS = {
@@ -50,6 +45,25 @@ const RISK_LABELS = {
   medium:    '🟡 Sedang',
   low:       '🟢 Rendah',
   very_low:  '🟢 Sangat Rendah',
+}
+
+const LEVEL_COLOR = {
+  awas:    '#dc2626',
+  siaga:   '#ea580c',
+  waspada: '#ca8a04',
+}
+
+function normName(value) {
+  return (value ?? '').trim().toLowerCase()
+}
+
+function findKecamatanBoost(boosts, name) {
+  if (!boosts || !name) return null
+  const key = normName(name)
+  for (const [kecamatan, boost] of Object.entries(boosts)) {
+    if (normName(kecamatan) === key && (boost?.boost_score ?? 0) > 0) return boost
+  }
+  return null
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -69,11 +83,14 @@ function ThemeTileLayer() {
 }
 
 // ── GeoJSON Tooltip (untuk polygon dari InaRisk) ──────────────────────────────
-function makeTooltipContent(feature, isDark) {
+function makeTooltipContent(feature, isDark, boost) {
   const p = feature.properties
   const bg   = isDark ? '#1f2937' : '#ffffff'
   const fg   = isDark ? '#f3f4f6' : '#111827'
   const bdr  = isDark ? '#374151' : '#e5e7eb'
+  const reportLine = boost
+    ? `<p style="margin:6px 0 0;font-size:12px">Laporan lapangan: ${boost.desa_name ?? ''} (+${boost.boost_score})</p>`
+    : ''
 
   const content = document.createElement('div')
   content.style.cssText = `background:${bg};color:${fg};border:1px solid ${bdr};border-radius:8px;padding:8px 10px;min-width:160px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.3)`
@@ -82,27 +99,35 @@ function makeTooltipContent(feature, isDark) {
     <p style="color:#f97316;margin:0 0 4px">${RISK_LABELS[p.risk] ?? p.risk}</p>
     <p style="opacity:.75;font-size:12px;margin:0">Indeks Bahaya: ${p.hazard?.toFixed(3) ?? 'N/A'}</p>
     ${p.kab ? `<p style="opacity:.55;font-size:11px;font-style:italic;margin:2px 0 0">${p.kab}</p>` : ''}
+    ${reportLine}
   `
   return content
 }
 
 // ── Live GeoJSON Overlay ──────────────────────────────────────────────────────
-function LiveFloodLayer({ geojson, isDark }) {
+function LiveFloodLayer({ geojson, isDark, kecamatanBoosts }) {
   const geoJsonRef = useRef(null)
+  const boostKey = Object.entries(kecamatanBoosts ?? {})
+    .map(([name, boost]) => `${name}:${boost.flood_level}:${boost.boost_score}`)
+    .join('|')
 
   const styleFeature = useCallback((feature) => {
-    const color = feature?.properties?.color ?? '#f97316'
+    const boost = findKecamatanBoost(kecamatanBoosts, feature?.properties?.name)
+    const color = boost
+      ? (LEVEL_COLOR[boost.flood_level] ?? feature?.properties?.color ?? '#f97316')
+      : (feature?.properties?.color ?? '#f97316')
     return {
       color,
       fillColor:   color,
-      fillOpacity: 0.30,
-      weight:      1.5,
+      fillOpacity: boost ? 0.55 : 0.30,
+      weight:      boost ? 2.5 : 1.5,
       opacity:     0.9,
     }
-  }, [])
+  }, [kecamatanBoosts])
 
   const onEachFeature = useCallback((feature, layer) => {
-    const tooltipEl = makeTooltipContent(feature, isDark)
+    const boost = findKecamatanBoost(kecamatanBoosts, feature?.properties?.name)
+    const tooltipEl = makeTooltipContent(feature, isDark, boost)
     layer.bindTooltip(tooltipEl, { sticky: true, className: 'inarisk-tooltip' })
 
     layer.on({
@@ -116,14 +141,14 @@ function LiveFloodLayer({ geojson, isDark }) {
         }
       },
     })
-  }, [isDark])
+  }, [isDark, kecamatanBoosts])
 
   if (!geojson) return null
 
   return (
     <GeoJSON
       ref={geoJsonRef}
-      key={`${geojson.city}-${geojson._timestamp}`}
+      key={`${geojson.city}-${geojson._timestamp}-${boostKey}`}
       data={geojson}
       style={styleFeature}
       onEachFeature={onEachFeature}
@@ -132,18 +157,30 @@ function LiveFloodLayer({ geojson, isDark }) {
 }
 
 // ── Mock Overlay (fallback) ───────────────────────────────────────────────────
-function MockFloodLayer({ city, isDark }) {
+function MockFloodLayer({ city, isDark, kecamatanBoosts }) {
   const zones = MOCK_FLOOD_ZONES[city] ?? []
   return (
     <>
-      {zones.map(zone => (
+      {zones.map(zone => {
+        const boost = findKecamatanBoost(kecamatanBoosts, zone.name)
+        const base  = MOCK_STYLE[zone.risk] ?? MOCK_STYLE.low
+        const style = boost
+          ? {
+              ...base,
+              color:       LEVEL_COLOR[boost.flood_level] ?? base.color,
+              fillColor:   LEVEL_COLOR[boost.flood_level] ?? base.fillColor,
+              fillOpacity: 0.55,
+              weight:      2.5,
+            }
+          : base
+        return (
         <Polygon
           key={zone.id}
           positions={zone.coords}
-          pathOptions={MOCK_STYLE[zone.risk] ?? MOCK_STYLE.low}
+          pathOptions={style}
           eventHandlers={{
-            mouseover: e => e.target.setStyle({ ...MOCK_STYLE[zone.risk], ...MOCK_HOVER[zone.risk] }),
-            mouseout:  e => e.target.setStyle(MOCK_STYLE[zone.risk]),
+            mouseover: e => e.target.setStyle({ ...style, fillOpacity: 0.7 }),
+            mouseout:  e => e.target.setStyle(style),
           }}
         >
           <Tooltip sticky>
@@ -164,11 +201,17 @@ function MockFloodLayer({ city, isDark }) {
               <p style={{ opacity: 0.55, fontSize: 11, fontStyle: 'italic', marginTop: 2 }}>
                 {zone.note}
               </p>
+              {boost && (
+                <p style={{ fontSize: 12, marginTop: 6 }}>
+                  Laporan lapangan: {boost.desa_name} (+{boost.boost_score})
+                </p>
+              )}
               <p style={{ opacity: 0.4, fontSize: 10, marginTop: 4 }}>⚠️ Mock data</p>
             </div>
           </Tooltip>
         </Polygon>
-      ))}
+        )
+      })}
     </>
   )
 }
@@ -216,7 +259,7 @@ function MapLegend({ isDark, isLive }) {
 
 
 // ── Main Component ────────────────────────────────────────────────────────────
-export default function MapView({ selectedCity }) {
+export default function MapView({ selectedCity, kecamatanBoosts = {} }) {
   const { theme }  = useTheme()
   const isDark     = theme === 'dark'
   const cityData   = CITY_CENTERS[selectedCity] ?? CITY_CENTERS.semarang
@@ -243,8 +286,8 @@ export default function MapView({ selectedCity }) {
 
         {/* Overlay: InaRisk live polygons ATAU mock zones sebagai fallback */}
         {hasLivePolygons
-          ? <LiveFloodLayer geojson={polygons} isDark={isDark} />
-          : <MockFloodLayer city={selectedCity} isDark={isDark} />
+          ? <LiveFloodLayer geojson={polygons} isDark={isDark} kecamatanBoosts={kecamatanBoosts} />
+          : <MockFloodLayer city={selectedCity} isDark={isDark} kecamatanBoosts={kecamatanBoosts} />
         }
       </MapContainer>
 

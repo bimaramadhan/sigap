@@ -4,7 +4,7 @@
  * Semua HTTP calls ke FastAPI backend.
  * Otomatis fallback ke mock data jika backend tidak tersedia.
  *
- * v3: Tambah flood report functions (submit, get, rivers, clear)
+ * v3: Tambah flood report functions (submit, get, villages, clear)
  */
 
 import axios from 'axios'
@@ -14,8 +14,7 @@ import {
   MOCK_WEATHER,
   MOCK_NARASI,
   MOCK_CITIES,
-  MOCK_RIVERS,
-  MOCK_FLOOD_REPORTS,
+  MOCK_VILLAGES,
   getMockReports,
   addMockReport,
   clearMockReports,
@@ -137,16 +136,31 @@ export async function getFullAnalysis(city) {
   }
 }
 
-// ── Flood Report API (v3) ─────────────────────────────────────────────────────
-// getMockReports, addMockReport, clearMockReports, MOCK_RIVERS sudah diimport di atas
+// ── Flood Report API ──────────────────────────────────────────────────────────
 
-export async function getFloodRivers(city) {
+function kecamatanBoostsFrom(reports) {
+  const out = {}
+  for (const report of reports) {
+    if (!report.kecamatan) continue
+    const prev = out[report.kecamatan]
+    if (prev && report.boost_score <= prev.boost_score) continue
+    out[report.kecamatan] = {
+      boost_score: report.boost_score,
+      flood_level: report.flood_level,
+      desa_name:   report.desa_name,
+      reason:      report.boost_breakdown?.reason ?? '',
+    }
+  }
+  return out
+}
+
+export async function getFloodVillages(city) {
   if (USE_MOCK) {
     await delay(200)
-    return { city, rivers: MOCK_RIVERS[city] ?? [] }
+    return { city, groups: MOCK_VILLAGES[city] ?? [] }
   }
-  try { return (await http.get(`/flood-rivers/${city}`)).data }
-  catch { return { city, rivers: MOCK_RIVERS[city] ?? [] } }
+  try { return (await http.get(`/flood-villages/${city}`)).data }
+  catch { return { city, groups: MOCK_VILLAGES[city] ?? [] } }
 }
 
 export async function getFloodReports(city) {
@@ -157,12 +171,26 @@ export async function getFloodReports(city) {
       ? Math.max(...reports.map(r => r.boost_score))
       : 0
     const reason  = reports[0]?.boost_breakdown?.reason ?? ''
-    return { city, report_count: reports.length, latest_boost: best, boost_reason: reason, reports }
+    return {
+      city,
+      report_count: reports.length,
+      latest_boost: best,
+      boost_reason: reason,
+      reports,
+      kecamatan_boosts: kecamatanBoostsFrom(reports),
+    }
   }
   try { return (await http.get(`/flood-reports/${city}`)).data }
   catch {
     const reports = getMockReports(city)
-    return { city, report_count: reports.length, latest_boost: 0, boost_reason: '', reports }
+    return {
+      city,
+      report_count: reports.length,
+      latest_boost: 0,
+      boost_reason: '',
+      reports,
+      kecamatan_boosts: {},
+    }
   }
 }
 

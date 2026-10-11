@@ -1,30 +1,22 @@
 """
 engine/flood_report.py
 ──────────────────────
-Penyimpanan laporan lapangan dari koordinator BPBD.
+Laporan lapangan dari koordinator BPBD, disimpan di Postgres.
 
 Koordinator memilih satu desa/kelurahan. Kecamatan induk diambil dari
-kode wilayah, bukan dari input bebas. Laporan ini menjadi boost ke
-vulnerability score kota dan ke kecamatan tempat desa itu berada.
-
-Sesuai Pasal 23 Peraturan BNPB No.2/2024 yang mewajibkan BPBD
-memberikan umpan balik kondisi lapangan ke sistem peringatan dini.
+kode wilayah. Laporan menaikkan skor kota selama 12 jam dan menandai
+kecamatan di peta. Riwayat laporan tetap tersimpan setelah jendela itu.
 """
 
-import json
 import time
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import datetime, timedelta, timezone
 
 from loguru import logger
+from psycopg.types.json import Jsonb
 
-from engine.wilayah import resolve_village
+from engine.db import connect, peek_base_score
+from engine.wilayah import canonical_kab, resolve_village
 
-# ── Config ────────────────────────────────────────────────────────────────────
-DATA_DIR   = Path("data")
-STORE_FILE = DATA_DIR / "flood_reports.json"
-
-# Boost ke vulnerability score berdasarkan status banjir desa
 FLOOD_LEVEL_BOOST = {
     "awas":    25,
     "siaga":   15,
@@ -32,7 +24,6 @@ FLOOD_LEVEL_BOOST = {
     "normal":   0,
 }
 
-# Label lengkap per level (sesuai BNPB No.2/2024)
 LEVEL_LABELS = {
     "normal":   {"label": "🟢 Normal",   "color": "green"},
     "waspada":  {"label": "🟡 Waspada",  "color": "yellow"},
@@ -40,37 +31,7 @@ LEVEL_LABELS = {
     "awas":     {"label": "🔴 Awas",     "color": "red"},
 }
 
-REPORT_WINDOW_SECONDS = 12 * 3600
-
-
-# ── In-Memory Store ───────────────────────────────────────────────────────────
-# Format: { "semarang": [report1, report2, ...], "bekasi": [...] }
-_store: dict[str, list[dict]] = {}
-
-
-def _load_from_disk() -> None:
-    """Load persisted reports dari file JSON saat startup."""
-    global _store
-    if STORE_FILE.exists():
-        try:
-            with open(STORE_FILE, encoding="utf-8") as f:
-                _store = json.load(f)
-            total = sum(len(v) for v in _store.values())
-            if total > 0:
-                logger.info(f"Loaded {total} flood reports dari disk")
-        except Exception as e:
-            logger.warning(f"Gagal load flood reports: {e}")
-            _store = {}
-
-
-def _save_to_disk() -> None:
-    """Persist reports ke file JSON."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(STORE_FILE, "w", encoding="utf-8") as f:
-        json.dump(_store, f, ensure_ascii=False, indent=2)
-
-
-_load_from_disk()
+REPORT_WINDOW = timedelta(hours=12)
 
 
 def _normalize_level(level: str) -> str:
@@ -81,7 +42,6 @@ def _normalize_level(level: str) -> str:
 
 
 def _calculate_boost(flood_level: str, desa_name: str, kecamatan: str) -> dict:
-    """Boost hanya dari status banjir desa. Tidak ada tambahan per area genangan."""
     level_boost = FLOOD_LEVEL_BOOST.get(flood_level, 0)
     reason = (
         f"Desa {desa_name}, Kec. {kecamatan} — {flood_level.upper()} (+{level_boost})"
@@ -95,41 +55,34 @@ def _calculate_boost(flood_level: str, desa_name: str, kecamatan: str) -> dict:
 
 
 def _public_report(report: dict) -> dict:
-    """Bentuk laporan yang dikirim ke API, termasuk laporan sungai yang lama."""
-    level = _normalize_level(report.get("flood_level") or report.get("river_level") or "normal")
+    level = _normalize_level(report.get("flood_level") or "normal")
+    reported_at = report.get("reported_at") or ""
+    if hasattr(reported_at, "isoformat"):
+        reported_at = reported_at.isoformat()
     return {
         "id":                 report.get("id", ""),
-        "city":               report.get("city", ""),
-        "reported_at":        report.get("reported_at", ""),
+        "city":               report.get("kab_kode") or report.get("city") or "",
+        "reported_at":        reported_at,
         "reporter":           report.get("reporter") or "Koordinator BPBD",
         "desa_kode":          report.get("desa_kode") or "",
-        "desa_name":          report.get("desa_name") or report.get("river_name") or "",
+        "desa_name":          report.get("desa_name") or "",
         "kecamatan":          report.get("kecamatan") or "",
         "kecamatan_kode":     report.get("kecamatan_kode") or "",
         "flood_level":        level,
-        "flood_level_label":  report.get("flood_level_label") or report.get("river_level_label") or LEVEL_LABELS[level]["label"],
+        "flood_level_label":  LEVEL_LABELS[level]["label"],
         "notes":              report.get("notes") or "",
         "boost_score":        float(report.get("boost_score") or 0),
         "boost_breakdown":    report.get("boost_breakdown") or {},
     }
 
 
-def _recent_reports(city: str) -> list[dict]:
-    """Laporan dalam 12 jam terakhir, terbaru dulu."""
-    reports = _store.get(city.lower(), [])
-    cutoff  = time.time() - REPORT_WINDOW_SECONDS
-    recent  = []
-    for report in reports:
-        try:
-            ts = datetime.fromisoformat(report["reported_at"]).timestamp()
-        except Exception:
-            continue
-        if ts > cutoff:
-            recent.append(report)
-    return recent
+def _require_kab(city: str) -> str:
+    kab = canonical_kab(city)
+    if not kab:
+        raise ValueError(f"Kab/kota '{city}' tidak ada di katalog wilayah")
+    return kab
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
 def add_report(
     city:        str,
     reporter:    str,
@@ -141,58 +94,98 @@ def add_report(
     Tambah laporan banjir untuk satu desa.
     Kecamatan diisi dari katalog wilayah. Desa di luar kota ditolak.
     """
-    city = city.lower()
-    village = resolve_village(city, desa_kode)
+    kab = _require_kab(city)
+    village = resolve_village(kab, desa_kode)
     flood_level = _normalize_level(flood_level)
     boost = _calculate_boost(flood_level, village["nama"], village["kecamatan"])
+    report_id = f"{kab}_{int(time.time() * 1000)}"
+    reported_at = datetime.now(timezone.utc)
 
-    report = {
-        "id":                 f"{city}_{int(time.time() * 1000)}",
-        "city":               city,
-        "reported_at":        datetime.now(timezone.utc).isoformat(),
-        "reporter":           reporter or "Koordinator BPBD",
-        "desa_kode":          village["kode"],
-        "desa_name":          village["nama"],
-        "kecamatan":          village["kecamatan"],
-        "kecamatan_kode":     village["kecamatan_kode"],
-        "flood_level":        flood_level,
-        "flood_level_label":  LEVEL_LABELS[flood_level]["label"],
-        "notes":              notes,
-        "boost_score":        boost["total"],
-        "boost_breakdown":    boost,
+    row = {
+        "id": report_id,
+        "kab_kode": kab,
+        "desa_kode": village["kode"],
+        "desa_name": village["nama"],
+        "kecamatan_kode": village["kecamatan_kode"],
+        "kecamatan": village["kecamatan"],
+        "flood_level": flood_level,
+        "boost_score": boost["total"],
+        "boost_breakdown": boost,
+        "reporter": reporter or "Koordinator BPBD",
+        "notes": notes or "",
+        "reported_at": reported_at,
+        "base_score_at_report": peek_base_score(kab),
     }
 
-    _store.setdefault(city, [])
-    _store[city].insert(0, report)
-    _store[city] = _store[city][:20]
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO flood_reports (
+                id, kab_kode, desa_kode, desa_name, kecamatan_kode, kecamatan,
+                flood_level, boost_score, boost_breakdown, reporter, notes,
+                reported_at, base_score_at_report
+            ) VALUES (
+                %(id)s, %(kab_kode)s, %(desa_kode)s, %(desa_name)s, %(kecamatan_kode)s,
+                %(kecamatan)s, %(flood_level)s, %(boost_score)s, %(boost_breakdown)s,
+                %(reporter)s, %(notes)s, %(reported_at)s, %(base_score_at_report)s
+            )
+            """,
+            {**row, "boost_breakdown": Jsonb(boost)},
+        )
+        conn.commit()
 
-    _save_to_disk()
     logger.success(
-        f"  Field report: {city} | {village['nama']} ({village['kecamatan']}) "
-        f"{flood_level.upper()} | boost=+{report['boost_score']}"
+        f"  Field report: {kab} | {village['nama']} ({village['kecamatan']}) "
+        f"{flood_level.upper()} | boost=+{boost['total']}"
     )
-    return _public_report(report)
+    return _public_report(row)
 
 
 def get_reports(city: str, limit: int = 10) -> list[dict]:
-    """Ambil laporan terbaru untuk satu kota."""
-    city = city.lower()
-    return [_public_report(r) for r in _store.get(city, [])[:limit]]
+    """Riwayat laporan terbaru untuk satu kab/kota, tidak dibatasi 12 jam."""
+    kab = _require_kab(city)
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM flood_reports
+            WHERE kab_kode = %s
+            ORDER BY reported_at DESC
+            LIMIT %s
+            """,
+            (kab, limit),
+        ).fetchall()
+    return [_public_report(row) for row in rows]
+
+
+def _recent_reports(kab: str) -> list[dict]:
+    cutoff = datetime.now(timezone.utc) - REPORT_WINDOW
+    with connect() as conn:
+        return conn.execute(
+            """
+            SELECT * FROM flood_reports
+            WHERE kab_kode = %s AND reported_at > %s
+            ORDER BY reported_at DESC
+            """,
+            (kab, cutoff),
+        ).fetchall()
 
 
 def get_latest_boost(city: str) -> dict:
     """
-    Boost tertinggi dari laporan 12 jam terakhir untuk seluruh kota.
+    Boost tertinggi dari laporan 12 jam terakhir untuk seluruh kab/kota.
     Bukan jumlah semua kecamatan.
     """
-    recent = _recent_reports(city)
+    kab = canonical_kab(city)
+    if not kab:
+        return {"boost_score": 0, "reason": "", "report_count": 0}
+
+    recent = _recent_reports(kab)
     if not recent:
         return {"boost_score": 0, "reason": "", "report_count": 0}
 
-    best  = max(recent, key=lambda r: r.get("boost_score") or 0)
+    best = max(recent, key=lambda row: row.get("boost_score") or 0)
     total = best.get("boost_score") or 0
     reason = (best.get("boost_breakdown") or {}).get("reason", "")
-
     return {
         "boost_score":   total,
         "reason":        reason,
@@ -205,10 +198,13 @@ def get_kecamatan_boosts(city: str) -> dict[str, dict]:
     """
     Boost tertinggi per nama kecamatan pada jendela 12 jam yang sama.
     Kunci adalah nama kecamatan supaya bisa dicocokkan ke WADMKC.
-    Laporan lama tanpa kecamatan diabaikan.
     """
+    kab = canonical_kab(city)
+    if not kab:
+        return {}
+
     best_by_name: dict[str, dict] = {}
-    for report in _recent_reports(city):
+    for report in _recent_reports(kab):
         name = (report.get("kecamatan") or "").strip()
         if not name:
             continue
@@ -216,7 +212,7 @@ def get_kecamatan_boosts(city: str) -> dict[str, dict]:
         current = best_by_name.get(name)
         if current is not None and score <= current["boost_score"]:
             continue
-        level = _normalize_level(report.get("flood_level") or report.get("river_level") or "normal")
+        level = _normalize_level(report.get("flood_level") or "normal")
         best_by_name[name] = {
             "boost_score": score,
             "flood_level": level,
@@ -227,10 +223,14 @@ def get_kecamatan_boosts(city: str) -> dict[str, dict]:
 
 
 def clear_reports(city: str) -> int:
-    """Hapus semua laporan untuk satu kota. Return jumlah yang dihapus."""
-    city  = city.lower()
-    count = len(_store.get(city, []))
-    _store[city] = []
-    _save_to_disk()
-    logger.info(f"Cleared {count} reports for {city}")
+    """Hapus semua laporan untuk satu kab/kota. Return jumlah yang dihapus."""
+    kab = _require_kab(city)
+    with connect() as conn:
+        deleted = conn.execute(
+            "DELETE FROM flood_reports WHERE kab_kode = %s",
+            (kab,),
+        )
+        count = deleted.rowcount
+        conn.commit()
+    logger.info(f"Cleared {count} reports for {kab}")
     return count

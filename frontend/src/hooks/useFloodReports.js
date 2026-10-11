@@ -37,7 +37,12 @@ export function useFloodReports(city, onSuccess) {
   }, [])
 
   useEffect(() => {
-    if (!city) return
+    if (!city) {
+      setVillages([])
+      setReports([])
+      setKecamatanBoosts({})
+      return
+    }
     fetchVillages(city)
     fetchReports(city)
   }, [city, fetchVillages, fetchReports])

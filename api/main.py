@@ -23,6 +23,7 @@ Jalankan:
 """
 
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Query
@@ -33,12 +34,21 @@ from loguru import logger
 
 load_dotenv()
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    from engine.db import init_db
+    init_db()
+    yield
+
+
 app = FastAPI(
     title       = "SIGAP API",
     description = "Sistem Integrasi Geospasial Aksi Penanggulangan Bencana",
-    version     = "0.3.0",
+    version     = "0.4.0",
     docs_url    = "/docs",
     redoc_url   = "/redoc",
+    lifespan    = lifespan,
 )
 
 app.add_middleware(
@@ -47,8 +57,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-SUPPORTED_CITIES = ["semarang", "bekasi", "jakarta", "surabaya"]
 
 
 # ── Response Models ───────────────────────────────────────────────────────────
@@ -128,6 +136,8 @@ class VulnerabilityResponse(BaseModel):
     elevation_min:    float
     priority_actions: list[str]
     resource_needs:   dict
+    baseline_fetched_at: str = ""
+    baseline_age_hours:  float = 0
 
 
 class NarasiResponse(BaseModel):
@@ -212,13 +222,14 @@ class FloodVillagesResponse(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _validate_city(city: str) -> str:
-    city = city.lower()
-    if city not in SUPPORTED_CITIES:
+    from engine.wilayah import canonical_kab
+    kab = canonical_kab(city)
+    if not kab:
         raise HTTPException(
             status_code=400,
-            detail=f"City '{city}' tidak didukung. Pilihan: {SUPPORTED_CITIES}",
+            detail=f"Kab/kota '{city}' tidak ada di katalog wilayah",
         )
-    return city
+    return kab
 
 
 def _weather_to_response(w: dict) -> WeatherResponse:
@@ -276,6 +287,8 @@ def _vuln_to_response(result) -> VulnerabilityResponse:
         elevation_min    = result.elevation_min,
         priority_actions = result.priority_actions,
         resource_needs   = result.resource_needs,
+        baseline_fetched_at = result.baseline_fetched_at,
+        baseline_age_hours  = result.baseline_age_hours,
     )
 
 
@@ -287,22 +300,17 @@ def health_check():
     return HealthResponse(
         status    = "ok",
         timestamp = datetime.now(timezone.utc).isoformat(),
-        version   = "0.3.0",
+        version   = "0.4.0",
         demo_mode = os.getenv("DEMO_MODE", "false").lower() == "true",
     )
 
 
 @app.get("/cities", tags=["System"])
-def list_cities():
-    """List kota yang didukung penuh (4 kota dengan hardcoded data)."""
-    from pipeline.ee_loader import CITY_BOUNDS
-    return {
-        "cities": [
-            {"id": k, **v}
-            for k, v in CITY_BOUNDS.items()
-            if k in SUPPORTED_CITIES
-        ]
-    }
+def list_cities(q: str = Query("", description="Saring nama, provinsi, atau kode")):
+    """Semua kabupaten/kota dari katalog wilayah Kemendagri."""
+    from engine.wilayah import list_kabupaten
+    rows = list_kabupaten(q)
+    return {"count": len(rows), "cities": rows}
 
 
 @app.get("/cities/search", tags=["System"])
@@ -310,40 +318,33 @@ def search_cities(
     q:     str = Query(..., min_length=2, description="Nama kota atau provinsi"),
     limit: int = Query(10, ge=1, le=50, description="Jumlah hasil maksimum"),
 ):
-    """
-    Cari kabupaten/kota di seluruh Indonesia dari registry InaRisk BNPB.
+    """Cari kab/kota di katalog wilayah. Id hasil adalah kode Kemendagri."""
+    from engine.wilayah import list_kabupaten
+    rows = list_kabupaten(q)
+    return {
+        "query":        q,
+        "count":        min(len(rows), limit),
+        "total_cities": len(list_kabupaten()),
+        "results":      rows[:limit],
+    }
 
-    Tidak terbatas pada 4 kota hardcoded — mencakup seluruh 514 kab/kota Indonesia.
-    Registry dibangun dari batas_administrasi/MapServer (InaRisk BNPB) dan
-    di-cache 30 hari.
 
-    Note: Request pertama mungkin lambat (~30-60s) karena download registry.
-          Subsequent requests sangat cepat (dari cache).
-
-    Contoh:
-      /cities/search?q=sema      → Semarang, Semarang Tengah, dll
-      /cities/search?q=bandung   → Kota Bandung, Kab Bandung, dll
-      /cities/search?q=jawa timur → semua kota di Jawa Timur
-    """
-    try:
-        from pipeline.city_registry import search_cities as _search, get_registry_stats
-        results = _search(q, limit=limit)
-        stats   = get_registry_stats()
-        return {
-            "query":        q,
-            "count":        len(results),
-            "total_cities": stats.get("total_cities", 0),
-            "results":      results,
-        }
-    except Exception as e:
-        logger.error(f"City search error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/cities/{kode}", tags=["System"])
+def get_city(kode: str):
+    """Satu kab/kota beserta bbox. Bbox di luar daftar demo diambil dari InaRisk."""
+    from engine.places import resolve_bbox
+    from engine.wilayah import lookup_kab
+    kab = lookup_kab(kode)
+    if not kab:
+        raise HTTPException(status_code=404, detail="Kab/kota tidak ditemukan")
+    bbox = kab.get("bbox") or resolve_bbox(kab["kode"]) or None
+    return {**kab, "bbox": bbox}
 
 
 @app.get("/alerts", response_model=AlertsResponse, tags=["Data"])
 def get_alerts(
     flood_only: bool = Query(True,  description="Hanya alert berpotensi banjir"),
-    city:       str  = Query(None,  description="Filter per kota (semarang/jakarta/bekasi/surabaya)"),
+    city:       str  = Query(None,  description="Filter per kode kab/kota, misalnya 33.74"),
 ):
     """
     Peringatan dini cuaca aktif dari BMKG (cache 30 menit).
@@ -352,22 +353,21 @@ def get_alerts(
     Contoh: /alerts?city=semarang → hanya alert Jawa Tengah.
     """
     try:
-        from pipeline.bmkg_ingest import fetch_active_alerts, CITY_PROVINCE_MAP
+        from pipeline.bmkg_ingest import fetch_active_alerts
+        from engine.wilayah import province_matches, province_of
         all_raw    = fetch_active_alerts(flood_only=False)
         flood_raw  = [a for a in all_raw if a.is_flood] if flood_only else all_raw
 
-        # Filter per provinsi kota jika parameter city diisi
         if city:
-            city_key  = city.lower()
-            city_prov = CITY_PROVINCE_MAP.get(city_key, "").lower()
+            city_prov = province_of(city)
             if city_prov:
                 flood_raw = [
                     a for a in flood_raw
-                    if city_prov in a.province.lower()
+                    if province_matches(a.province, city_prov)
                 ]
                 all_raw = [
                     a for a in all_raw
-                    if city_prov in a.province.lower()
+                    if province_matches(a.province, city_prov)
                 ]
 
         summaries = [
@@ -405,7 +405,7 @@ def get_weather(city: str):
     - boost_score       : poin tambahan ke vulnerability score (0-25)
 
     Data real-time dari BMKG Prakiraan Cuaca API.
-    Cache 60 menit.
+    Cache 6 jam.
     """
     city = _validate_city(city)
     try:
@@ -426,16 +426,11 @@ def get_features(city: str):
     """
     city = _validate_city(city)
     try:
-        from pipeline.inarisk_loader import get_features_for_vulnerability
-        return get_features_for_vulnerability(city)
-    except Exception as e_inarisk:
-        logger.warning(f"InaRisk gagal: {e_inarisk} — fallback ke EE")
-        try:
-            from pipeline.ee_loader import get_all_features
-            return get_all_features(city)
-        except Exception as e_ee:
-            logger.error(f"EE juga gagal: {e_ee}")
-            raise HTTPException(status_code=500, detail=f"InaRisk: {e_inarisk}; EE: {e_ee}")
+        from engine.baseline import ensure_baseline
+        return ensure_baseline(city)["features"]
+    except Exception as exc:
+        logger.error(f"Baseline fitur gagal: {exc}")
+        raise HTTPException(status_code=503, detail=str(exc))
 
 
 @app.get("/vulnerability/{city}", response_model=VulnerabilityResponse, tags=["Analysis"])
@@ -457,29 +452,13 @@ def get_vulnerability(
     """
     city = _validate_city(city)
     try:
-        from engine.vulnerability import calculate_from_cache_or_ee
-        from engine.flood_report  import get_latest_boost as get_field_boost
-
-        result      = calculate_from_cache_or_ee(
+        from engine.scoring import score_city
+        result, _, _ = score_city(
             city,
             include_weather = with_weather,
             include_alerts  = with_alerts,
+            include_field   = with_field,
         )
-
-        # Tambahkan field report boost jika ada laporan baru
-        if with_field:
-            field = get_field_boost(city)
-            if field["boost_score"] > 0:
-                # Inject ke result — cap total boost pada 30
-                extra = min(field["boost_score"], max(0, 30 - result.weather_boost - result.alert_boost))
-                result.score           = round(min(100, result.score + extra), 1)
-                result.priority_actions.insert(0,
-                    f"📡 Laporan lapangan: {field.get('boost_reason') or field.get('reason', '')} (+{extra:.0f} poin)"
-                )
-                # Update kategori
-                from engine.vulnerability import _get_category
-                result.category, result.category_message = _get_category(result.score)
-
         return _vuln_to_response(result)
     except Exception as e:
         logger.error(f"Error calculating vulnerability: {e}")
@@ -494,10 +473,10 @@ def get_narasi(
     """Narasi bahasa Indonesia dari hasil analisis."""
     city = _validate_city(city)
     try:
-        from engine.vulnerability import calculate_from_cache_or_ee
-        from engine.narrator      import generate_narasi
+        from engine.narrator import generate_narasi
+        from engine.scoring import score_city
 
-        result = calculate_from_cache_or_ee(city)
+        result, _, _ = score_city(city)
         output = generate_narasi(result, use_gemini=use_gemini)
 
         return NarasiResponse(
@@ -527,29 +506,18 @@ def full_analysis(
     Ini endpoint utama yang dikonsumsi frontend dashboard.
     """
     city = _validate_city(city)
-    logger.info(f"Full analysis: {city}")
+    logger.info(f"Full analysis: {city} (flood_only={flood_only})")
 
     try:
-        from pipeline.bmkg_ingest    import fetch_active_alerts
-        from pipeline.bmkg_weather   import get_weather_summary
-        from pipeline.ee_loader      import get_all_features, CITY_BOUNDS
-        from engine.vulnerability    import calculate
-        from engine.narrator         import generate_narasi
+        from engine.narrator import generate_narasi
+        from engine.scoring import score_city
 
-        # 1. Fetch semua data paralel (sequential untuk simplicity)
-        alerts       = fetch_active_alerts(flood_only=flood_only)
-        weather_data = get_weather_summary(city)
-        ee_features  = get_all_features(city)
-
-        # 2. Filter alert relevan untuk kota ini
-        city_prov  = CITY_BOUNDS.get(city, {}).get("province", "").lower()
-        rel_alerts = [
-            a for a in alerts
-            if city_prov.split()[0] in a.province.lower()
-        ] if city_prov else alerts[:5]
-
-        # 3. Hitung vulnerability dengan weather + alert boost
-        vuln_result = calculate(city, ee_features, weather_data, rel_alerts)
+        vuln_result, weather_data, rel_alerts = score_city(
+            city,
+            include_alerts = True,
+            include_weather = True,
+            include_field = True,
+        )
 
         # 4. Generate narasi
         narasi_out  = generate_narasi(vuln_result, use_gemini=use_gemini)
@@ -690,11 +658,27 @@ def get_flood_polygons(city: str, force: bool = Query(False)):
     """
     city = _validate_city(city)
     try:
-        from pipeline.inarisk_polygon import get_flood_polygons as _get_polygons
-        return _get_polygons(city, force_refresh=force)
+        from engine.baseline import get_polygons
+        return get_polygons(city, force=force)
     except Exception as e:
         logger.error(f"Error fetching flood polygons: {e}")
         raise HTTPException(
             status_code=503,
             detail=f"InaRisk polygon service tidak tersedia: {str(e)}"
         )
+
+
+@app.post("/internal/refresh-baselines", tags=["System"])
+def refresh_baselines(
+    limit: int = Query(5, ge=1, le=20),
+    token: str = Query(""),
+):
+    """
+    Refresh baseline InaRisk yang lebih tua dari 7 hari.
+    Cloud Scheduler memanggil endpoint ini dengan REFRESH_TOKEN.
+    """
+    expected = os.getenv("REFRESH_TOKEN", "")
+    if not expected or token != expected:
+        raise HTTPException(status_code=401, detail="Token refresh tidak valid")
+    from engine.baseline import refresh_stale
+    return refresh_stale(limit=limit)

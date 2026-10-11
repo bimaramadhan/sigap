@@ -21,9 +21,25 @@ import {
 } from './mockData.js'
 
 const BASE_URL = '/api'
-const http     = axios.create({ baseURL: BASE_URL, timeout: 15000 })
+const http     = axios.create({ baseURL: BASE_URL, timeout: 120000 })
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 const delay    = (ms = 600) => new Promise(r => setTimeout(r, ms))
+
+const MOCK_ALIAS = {
+  '33.74': 'semarang',
+  '32.75': 'bekasi',
+  '35.78': 'surabaya',
+  '31.71': 'jakarta',
+  '31.72': 'jakarta',
+  '31.73': 'jakarta',
+  '31.74': 'jakarta',
+  '31.75': 'jakarta',
+}
+
+function mockCity(table, city, fallback = 'semarang') {
+  if (!table) return undefined
+  return table[city] ?? table[MOCK_ALIAS[city]] ?? table[fallback]
+}
 
 // ── API Functions ─────────────────────────────────────────────────────────────
 
@@ -31,6 +47,15 @@ export async function getCities() {
   if (USE_MOCK) { await delay(200); return { cities: MOCK_CITIES } }
   try { return (await http.get('/cities')).data }
   catch { return { cities: MOCK_CITIES } }
+}
+
+export async function getCity(kode) {
+  if (USE_MOCK) {
+    await delay(200)
+    return MOCK_CITIES.find(city => city.id === kode) ?? MOCK_CITIES[0]
+  }
+  try { return (await http.get(`/cities/${kode}`)).data }
+  catch { return MOCK_CITIES.find(city => city.id === kode) ?? { id: kode, label: kode, bbox: null } }
 }
 
 export async function getAlerts(floodOnly = true, city = null) {
@@ -46,24 +71,24 @@ export async function getAlerts(floodOnly = true, city = null) {
 export async function getWeather(city) {
   if (USE_MOCK) {
     await delay(700)
-    return MOCK_WEATHER[city] ?? MOCK_WEATHER.semarang
+    return mockCity(MOCK_WEATHER, city)
   }
   try { return (await http.get(`/weather/${city}`)).data }
   catch {
     console.warn(`Fallback → mock weather (${city})`)
-    return MOCK_WEATHER[city] ?? MOCK_WEATHER.semarang
+    return mockCity(MOCK_WEATHER, city)
   }
 }
 
 export async function getVulnerability(city) {
   if (USE_MOCK) {
     await delay(1000)
-    return MOCK_VULNERABILITY[city] ?? MOCK_VULNERABILITY.semarang
+    return mockCity(MOCK_VULNERABILITY, city)
   }
   try { return (await http.get(`/vulnerability/${city}`)).data }
   catch {
     console.warn(`Fallback → mock vulnerability (${city})`)
-    return MOCK_VULNERABILITY[city] ?? MOCK_VULNERABILITY.semarang
+    return mockCity(MOCK_VULNERABILITY, city)
   }
 }
 
@@ -72,9 +97,9 @@ export async function getNarasi(city, useGemini = true) {
     await delay(1200)
     return {
       city,
-      score:       MOCK_VULNERABILITY[city]?.score ?? 70,
-      category:    MOCK_VULNERABILITY[city]?.category ?? '🟠 TINGGI',
-      narasi:      MOCK_NARASI[city] ?? MOCK_NARASI.semarang,
+      score:       mockCity(MOCK_VULNERABILITY, city)?.score ?? 70,
+      category:    mockCity(MOCK_VULNERABILITY, city)?.category ?? '🟠 TINGGI',
+      narasi:      mockCity(MOCK_NARASI, city),
       source:      'template',
       model:       'mock',
       generated_at:new Date().toISOString(),
@@ -86,9 +111,9 @@ export async function getNarasi(city, useGemini = true) {
     console.warn(`Fallback → mock narasi (${city})`)
     return {
       city,
-      score:       MOCK_VULNERABILITY[city]?.score ?? 70,
-      category:    MOCK_VULNERABILITY[city]?.category ?? '🟠 TINGGI',
-      narasi:      MOCK_NARASI[city] ?? MOCK_NARASI.semarang,
+      score:       mockCity(MOCK_VULNERABILITY, city)?.score ?? 70,
+      category:    mockCity(MOCK_VULNERABILITY, city)?.category ?? '🟠 TINGGI',
+      narasi:      mockCity(MOCK_NARASI, city),
       source:      'template',
       model:       'mock',
       generated_at:new Date().toISOString(),
@@ -99,9 +124,9 @@ export async function getNarasi(city, useGemini = true) {
 export async function getFullAnalysis(city) {
   if (USE_MOCK) {
     await delay(1500)
-    const vuln   = MOCK_VULNERABILITY[city] ?? MOCK_VULNERABILITY.semarang
-    const narasi = MOCK_NARASI[city] ?? MOCK_NARASI.semarang
-    const weather= MOCK_WEATHER[city] ?? MOCK_WEATHER.semarang
+    const vuln   = mockCity(MOCK_VULNERABILITY, city)
+    const narasi = mockCity(MOCK_NARASI, city)
+    const weather= mockCity(MOCK_WEATHER, city)
     return {
       city,
       analyzed_at:   new Date().toISOString(),
@@ -118,8 +143,8 @@ export async function getFullAnalysis(city) {
   }
   try { return (await http.get(`/analyze/${city}`)).data }
   catch {
-    const vuln   = MOCK_VULNERABILITY[city] ?? MOCK_VULNERABILITY.semarang
-    const weather= MOCK_WEATHER[city] ?? MOCK_WEATHER.semarang
+    const vuln   = mockCity(MOCK_VULNERABILITY, city)
+    const weather= mockCity(MOCK_WEATHER, city)
     return {
       city, analyzed_at: new Date().toISOString(),
       active_alerts: MOCK_ALERTS.alerts.slice(0, 3),
@@ -127,7 +152,7 @@ export async function getFullAnalysis(city) {
       vulnerability: vuln,
       narasi: {
         city, score: vuln.score, category: vuln.category,
-        narasi: MOCK_NARASI[city] ?? MOCK_NARASI.semarang,
+        narasi: mockCity(MOCK_NARASI, city),
         source: 'template', model: 'mock',
         generated_at: new Date().toISOString(),
       },
@@ -157,10 +182,10 @@ function kecamatanBoostsFrom(reports) {
 export async function getFloodVillages(city) {
   if (USE_MOCK) {
     await delay(200)
-    return { city, groups: MOCK_VILLAGES[city] ?? [] }
+    return { city, groups: mockCity(MOCK_VILLAGES, city) ?? [] }
   }
   try { return (await http.get(`/flood-villages/${city}`)).data }
-  catch { return { city, groups: MOCK_VILLAGES[city] ?? [] } }
+  catch { return { city, groups: mockCity(MOCK_VILLAGES, city) ?? [] } }
 }
 
 export async function getFloodReports(city) {
@@ -228,7 +253,7 @@ export async function getFloodPolygons(city) {
     return null
   }
   try {
-    const { data } = await http.get(`/flood-polygons/${city}`, { timeout: 45000 })
+    const { data } = await http.get(`/flood-polygons/${city}`, { timeout: 120000 })
     return data
   } catch (e) {
     console.warn(`Flood polygon tidak tersedia (${city}), pakai mock zones`)

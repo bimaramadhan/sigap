@@ -67,12 +67,21 @@ function findKecamatanBoost(boosts, name) {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
-function FlyToCity({ city }) {
+function viewFromBbox(bbox) {
+  if (!bbox || bbox.length < 4) return null
+  const [west, south, east, north] = bbox
+  if ([west, south, east, north].some(value => typeof value !== 'number')) return null
+  return {
+    center: [(south + north) / 2, (west + east) / 2],
+    zoom: 11,
+  }
+}
+
+function FlyToCity({ center, zoom, flyKey }) {
   const map = useMap()
-  const cfg = CITY_CENTERS[city]
   useEffect(() => {
-    if (cfg) map.flyTo(cfg.center, cfg.zoom, { duration: 1.2, easeLinearity: 0.3 })
-  }, [city]) // eslint-disable-line
+    if (center) map.flyTo(center, zoom, { duration: 1.2, easeLinearity: 0.3 })
+  }, [flyKey]) // eslint-disable-line
   return null
 }
 
@@ -259,20 +268,25 @@ function MapLegend({ isDark, isLive }) {
 
 
 // ── Main Component ────────────────────────────────────────────────────────────
-export default function MapView({ selectedCity, kecamatanBoosts = {} }) {
+export default function MapView({ selectedCity, cityLabel, bbox, kecamatanBoosts = {} }) {
   const { theme }  = useTheme()
   const isDark     = theme === 'dark'
-  const cityData   = CITY_CENTERS[selectedCity] ?? CITY_CENTERS.semarang
+  const fromBbox   = viewFromBbox(bbox)
+  const fallback   = CITY_CENTERS[selectedCity]
+  const center     = fromBbox?.center ?? fallback?.center ?? [-2.5, 118]
+  const zoom       = fromBbox?.zoom ?? fallback?.zoom ?? 5
+  const label      = cityLabel || selectedCity
 
   // Fetch polygon dari InaRisk BNPB
-  const { polygons, loading: polygonsLoading } = useFloodPolygons(selectedCity)
+  const { polygons, loading: polygonsLoading } = useFloodPolygons(fromBbox ? selectedCity : null)
   const hasLivePolygons = polygons && polygons.features?.length > 0
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: 420 }}>
       <MapContainer
-        center={cityData.center}
-        zoom={cityData.zoom}
+        key={bbox ? bbox.join(',') : selectedCity}
+        center={center}
+        zoom={zoom}
         zoomControl={false}
         style={{
           width: '100%', height: '100%', minHeight: 420,
@@ -281,7 +295,11 @@ export default function MapView({ selectedCity, kecamatanBoosts = {} }) {
         }}
       >
         <ThemeTileLayer />
-        <FlyToCity city={selectedCity} />
+        <FlyToCity
+          center={center}
+          zoom={zoom}
+          flyKey={bbox ? bbox.join(',') : selectedCity}
+        />
         <ZoomControl position="bottomright" />
 
         {/* Overlay: InaRisk live polygons ATAU mock zones sebagai fallback */}
@@ -317,7 +335,7 @@ export default function MapView({ selectedCity, kecamatanBoosts = {} }) {
         color: isDark ? '#f3f4f6' : '#1e293b',
         backdropFilter: 'blur(8px)',
       }}>
-        📍 {selectedCity.charAt(0).toUpperCase() + selectedCity.slice(1)}
+        📍 {label}
         {hasLivePolygons && (
           <span style={{ marginLeft: 6, fontSize: 11, color: isDark ? '#6b7280' : '#94a3b8' }}>
             ({polygons.features.length} kec.)

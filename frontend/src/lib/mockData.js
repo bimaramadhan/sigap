@@ -10,10 +10,10 @@
  */
 
 export const MOCK_CITIES = [
-  { id: 'semarang',  label: 'Kota Semarang',   province: 'Jawa Tengah', bbox: [110.29, -7.11, 110.51, -6.96] },
-  { id: 'bekasi',    label: 'Kota/Kab Bekasi',  province: 'Jawa Barat',  bbox: [106.88, -6.38, 107.05, -6.17] },
-  { id: 'jakarta',   label: 'DKI Jakarta',      province: 'DKI Jakarta', bbox: [106.68, -6.38, 107.00, -6.08] },
-  { id: 'surabaya',  label: 'Kota Surabaya',    province: 'Jawa Timur',  bbox: [112.60, -7.40, 112.85, -7.15] },
+  { id: '33.74', kode: '33.74', label: 'Kota Semarang', province: 'Jawa Tengah', bbox: [110.29, -7.11, 110.51, -6.96] },
+  { id: '32.75', kode: '32.75', label: 'Kota Bekasi', province: 'Jawa Barat', bbox: [106.88, -6.38, 107.05, -6.17] },
+  { id: '31.71', kode: '31.71', label: 'Kota Jakarta Pusat', province: 'Daerah Khusus Ibukota Jakarta', bbox: [106.78, -6.23, 106.87, -6.12] },
+  { id: '35.78', kode: '35.78', label: 'Kota Surabaya', province: 'Jawa Timur', bbox: [112.60, -7.40, 112.85, -7.15] },
 ]
 
 export const MOCK_ALERTS = {

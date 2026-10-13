@@ -1,46 +1,94 @@
-import { RefreshCw, Wifi, WifiOff, Clock, Sun, Moon } from 'lucide-react'
+import { RefreshCw, Wifi, WifiOff, Clock, Sun, Moon, Map, FileText } from 'lucide-react'
 import clsx from 'clsx'
 import { useTheme } from '../lib/ThemeContext.jsx'
 
 export default function Header({
   selectedCity, cities, onCityChange,
-  onRefresh, isLoading, lastUpdated, isLive
+  onRefresh, isLoading, lastUpdated, isLive,
+  currentPath = '/', onNavigate = () => {},
 }) {
   const { theme, toggleTheme } = useTheme()
   const isDark = theme === 'dark'
 
   return (
     <header className={clsx(
-      'flex items-center justify-between px-5 py-3 shrink-0 border-b',
+      'flex items-center justify-between px-4 md:px-5 py-3 shrink-0 border-b gap-3 flex-wrap sm:flex-nowrap',
       isDark
         ? 'bg-gray-900 border-gray-800'
         : 'bg-white border-gray-200'
     )}>
-      {/* Logo */}
-      <div className="flex items-center gap-2.5">
-        <span className="text-2xl">🌊</span>
-        <div>
-          <h1 className={clsx('font-bold text-lg leading-none',
-            isDark ? 'text-white' : 'text-gray-900'
-          )}>SIGAP</h1>
-          <p className={clsx('text-xs leading-none mt-0.5',
-            isDark ? 'text-gray-400' : 'text-gray-500'
-          )}>
-            Sistem Penanggulangan Banjir
-          </p>
+      {/* Left section: Logo & Nav */}
+      <div className="flex items-center gap-4">
+        {/* Logo */}
+        <div
+          onClick={() => onNavigate('/')}
+          className="flex items-center gap-2.5 cursor-pointer select-none"
+          title="Ke Dashboard"
+        >
+          <span className="text-2xl">🌊</span>
+          <div>
+            <h1 className={clsx('font-bold text-lg leading-none',
+              isDark ? 'text-white' : 'text-gray-900'
+            )}>SIGAP</h1>
+            <p className={clsx('text-xs leading-none mt-0.5',
+              isDark ? 'text-gray-400' : 'text-gray-500'
+            )}>
+              Sistem Penanggulangan Banjir
+            </p>
+          </div>
         </div>
+
+        {/* Navigation Tabs */}
+        <nav className={clsx(
+          'flex items-center gap-1 p-1 rounded-xl border text-xs',
+          isDark ? 'bg-gray-800/80 border-gray-700/80' : 'bg-gray-100 border-gray-200'
+        )}>
+          <button
+            type="button"
+            onClick={() => onNavigate('/')}
+            className={clsx(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition-all',
+              currentPath === '/'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : isDark
+                  ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-700/50'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/60'
+            )}
+          >
+            <Map size={13} />
+            <span className="hidden sm:inline">Dashboard</span>
+            <span className="sm:hidden">Peta</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigate('/report')}
+            className={clsx(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition-all',
+              currentPath === '/report'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : isDark
+                  ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-700/50'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/60'
+            )}
+          >
+            <FileText size={13} />
+            <span className="hidden sm:inline">Laporan & Briefing</span>
+            <span className="sm:hidden">Laporan</span>
+          </button>
+        </nav>
       </div>
 
-      {/* City selector */}
+      {/* Middle section: City selector */}
       <div className="flex items-center gap-2">
-        <label className={clsx('text-sm', isDark ? 'text-gray-400' : 'text-gray-600')}>
+        <label className={clsx('text-sm hidden sm:inline', isDark ? 'text-gray-400' : 'text-gray-600')}>
           Kota:
         </label>
         <select
           value={selectedCity}
           onChange={e => onCityChange(e.target.value)}
           className={clsx(
-            'border rounded-lg px-3 py-1.5 text-sm cursor-pointer',
+            'border rounded-lg px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm cursor-pointer',
             'focus:outline-none focus:ring-2 focus:ring-blue-500',
             isDark
               ? 'bg-gray-800 text-white border-gray-700'

@@ -7,13 +7,28 @@
  * ditampilkan dari katalog wilayah dan tidak bisa diubah.
  * Status banjir (Normal/Waspada/Siaga/Awas) menentukan boost skor.
  *
- * Ketika di-submit → vulnerability score kota naik, dan kecamatan
- * induk desa itu ditandai di peta.
+ * Kemanan & Otentikasi:
+ * Sesuai Peraturan BNPB No.2/2024, fitur pelaporan lapangan ini diproteksi
+ * menggunakan Login with Google agar hanya petugas BPBD yang sudah terotentikasi
+ * yang dapat mengisi dan mengirimkan laporan.
  */
 
 import { useMemo, useState, useEffect } from 'react'
-import { Send, Droplets, CheckCircle2, AlertTriangle, RotateCcw } from 'lucide-react'
+import {
+  Send,
+  Droplets,
+  CheckCircle2,
+  AlertTriangle,
+  RotateCcw,
+  ShieldCheck,
+  BadgeCheck,
+  LogOut,
+  Lock,
+  Sparkles,
+} from 'lucide-react'
 import clsx from 'clsx'
+import GoogleIcon from './GoogleIcon.jsx'
+import { useAuth } from '../lib/AuthContext.jsx'
 
 const FLOOD_LEVELS = [
   {
@@ -58,17 +73,18 @@ const FLOOD_LEVELS = [
   },
 ]
 
-function LevelButton({ level, selected, onSelect, isDark }) {
+function LevelButton({ level, selected, onSelect, isDark, disabled }) {
   const isActive = selected === level.id
   const variant  = isDark ? 'dark' : 'light'
 
   return (
     <button
       type="button"
-      onClick={() => onSelect(level.id)}
+      onClick={() => !disabled && onSelect(level.id)}
+      disabled={disabled}
       className={clsx(
-        'flex-1 flex flex-col items-center gap-1 p-2.5 rounded-xl border-2',
-        'transition-all duration-150 cursor-pointer',
+        'flex-1 flex flex-col items-center gap-1 p-2.5 rounded-xl border-2 transition-all duration-150',
+        disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer',
         isActive ? level.active[variant] : level.bg[variant]
       )}
     >
@@ -126,7 +142,7 @@ function ReportCard({ report, isDark }) {
 
   return (
     <div className={clsx(
-      'p-3 rounded-xl border text-xs space-y-1',
+      'p-3 rounded-xl border text-xs space-y-1.5 transition-all',
       level.bg[variant]
     )}>
       <div className="flex items-center justify-between">
@@ -143,6 +159,21 @@ function ReportCard({ report, isDark }) {
           Kecamatan {report.kecamatan}
         </div>
       )}
+
+      {/* Verified Officer Tag */}
+      {report.reporter && (
+        <div className={clsx(
+          'flex items-center gap-1.5 pt-0.5 text-[11px]',
+          isDark ? 'text-blue-300' : 'text-blue-700'
+        )}>
+          <ShieldCheck size={12} className="text-blue-500 shrink-0" />
+          <span className="font-semibold truncate">Oleh: {report.reporter}</span>
+          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-blue-500/20 text-blue-400 font-medium">
+            Terverifikasi
+          </span>
+        </div>
+      )}
+
       {report.notes && (
         <div className={clsx('text-[11px] italic', isDark ? 'text-gray-400' : 'text-gray-500')}>
           &ldquo;{report.notes}&rdquo;
@@ -165,7 +196,9 @@ export default function FloodInputPanel({
   onSubmit,
   onClear,
 }) {
-  const [reporter,   setReporter]   = useState('')
+  const { user, isAuthenticated, openAuthModal, logout } = useAuth()
+
+  const [reporter,   setReporter]   = useState(user?.name || '')
   const [desaKode,   setDesaKode]   = useState('')
   const [filter,     setFilter]     = useState('')
   const [floodLevel, setFloodLevel] = useState('normal')
@@ -173,6 +206,15 @@ export default function FloodInputPanel({
   const [submitting, setSubmitting] = useState(false)
   const [submitted,  setSubmitted]  = useState(false)
   const [error,      setError]      = useState('')
+
+  // Sync reporter name when user logs in / out
+  useEffect(() => {
+    if (user?.name) {
+      setReporter(user.name)
+    } else {
+      setReporter('')
+    }
+  }, [user])
 
   useEffect(() => {
     setDesaKode('')
@@ -211,6 +253,13 @@ export default function FloodInputPanel({
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+
+    // Enforce authentication: only authenticated officers can submit
+    if (!isAuthenticated || !user) {
+      openAuthModal()
+      return
+    }
+
     if (!desaKode) {
       setError('Desa atau kelurahan wajib dipilih')
       return
@@ -221,7 +270,9 @@ export default function FloodInputPanel({
     try {
       await onSubmit?.({
         city,
-        reporter:    reporter || 'Koordinator BPBD',
+        reporter:    reporter || user.name || 'Koordinator BPBD',
+        reporter_email: user.email || '',
+        reporter_avatar: user.picture || '',
         desa_kode:   desaKode,
         flood_level: floodLevel,
         notes,
@@ -242,7 +293,8 @@ export default function FloodInputPanel({
     'focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors',
     isDark
       ? 'bg-gray-800 border-gray-700 text-white placeholder-gray-500'
-      : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
+      : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400',
+    !isAuthenticated && 'cursor-not-allowed opacity-75'
   )
 
   const labelCls = clsx(
@@ -252,32 +304,139 @@ export default function FloodInputPanel({
 
   return (
     <div className="space-y-4">
+
+      {/* ── Google Officer Auth Banner ─────────────────────────────────────── */}
+      {!isAuthenticated ? (
+        <div className={clsx(
+          'p-4 rounded-2xl border transition-all space-y-3',
+          isDark
+            ? 'bg-gradient-to-r from-blue-950/40 via-slate-900 to-indigo-950/40 border-blue-500/30 text-white'
+            : 'bg-gradient-to-r from-blue-50 via-white to-indigo-50/70 border-blue-200 text-gray-900 shadow-sm'
+        )}>
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-white shadow-md flex items-center justify-center shrink-0 border border-gray-100">
+              <GoogleIcon size={22} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm font-bold">Login Petugas Diperlukan</h3>
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                  🔒 Khusus Petugas BPBD
+                </span>
+              </div>
+              <p className={clsx('text-xs mt-1 leading-relaxed', isDark ? 'text-gray-300' : 'text-gray-600')}>
+                Sesuai SOP BNPB No.2/2024, verifikasi akun Google diperlukan agar hanya petugas resmi yang dapat mengisi dan mengirim laporan validasi lapangan.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={openAuthModal}
+            className="w-full flex items-center justify-center gap-2.5 py-2.5 px-4 rounded-xl bg-white hover:bg-gray-50 text-gray-800 font-semibold text-xs border border-gray-300 shadow-sm transition-all hover:shadow hover:scale-[1.005] active:scale-[0.99] cursor-pointer"
+          >
+            <GoogleIcon size={16} />
+            <span>Login with Google untuk Mengisi Form</span>
+          </button>
+        </div>
+      ) : (
+        /* Logged In Officer Card */
+        <div className={clsx(
+          'p-3.5 rounded-2xl border transition-all flex items-center justify-between gap-3',
+          isDark
+            ? 'bg-blue-950/30 border-blue-500/30 text-blue-200'
+            : 'bg-blue-50/80 border-blue-200 text-blue-900 shadow-sm'
+        )}>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="relative shrink-0">
+              {user.picture ? (
+                <img
+                  src={user.picture}
+                  alt={user.name}
+                  className="w-10 h-10 rounded-full object-cover border-2 border-blue-500 shrink-0"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
+                  {user.name?.charAt(0) || 'P'}
+                </div>
+              )}
+              <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-green-500 border-2 border-white dark:border-gray-900" title="Aktif" />
+            </div>
+
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className={clsx('font-bold text-xs md:text-sm truncate', isDark ? 'text-white' : 'text-gray-900')}>
+                  {user.name}
+                </span>
+                <BadgeCheck size={15} className="text-blue-500 shrink-0" />
+              </div>
+              <p className={clsx('text-[11px] truncate', isDark ? 'text-blue-300/80' : 'text-blue-700/80')}>
+                {user.role || 'Petugas Lapangan BPBD'} • {user.email}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={logout}
+            title="Keluar / Ganti Akun"
+            className={clsx(
+              'flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[11px] font-medium transition-all shrink-0 cursor-pointer',
+              isDark
+                ? 'bg-gray-800/80 border-gray-700 text-gray-300 hover:text-white hover:bg-gray-700'
+                : 'bg-white border-gray-300 text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+            )}
+          >
+            <LogOut size={12} />
+            <span className="hidden sm:inline">Keluar</span>
+          </button>
+        </div>
+      )}
+
+      {/* ── Form Pelaporan Lapangan ────────────────────────────────────────── */}
       <form onSubmit={handleSubmit} className="space-y-3">
+        {/* Nama Petugas Field */}
         <div>
-          <label className={labelCls}>Nama Petugas</label>
-          <input
-            type="text"
-            placeholder="Koordinator BPBD (opsional)"
-            value={reporter}
-            onChange={e => setReporter(e.target.value)}
-            className={inputCls}
-          />
+          <div className="flex items-center justify-between mb-1.5">
+            <label className={labelCls}>Nama Petugas</label>
+            {isAuthenticated ? (
+              <span className="text-[10px] flex items-center gap-1 text-green-500 font-medium">
+                <BadgeCheck size={12} /> Google Verified
+              </span>
+            ) : (
+              <span className="text-[10px] text-amber-500 font-medium flex items-center gap-1">
+                <Lock size={10} /> Perlu Login
+              </span>
+            )}
+          </div>
+          <div className="relative">
+            <input
+              type="text"
+              placeholder={isAuthenticated ? user?.name : 'Login with Google untuk mengisi'}
+              value={reporter}
+              onChange={e => setReporter(e.target.value)}
+              disabled={!isAuthenticated}
+              className={clsx(inputCls, isAuthenticated && 'font-medium')}
+            />
+          </div>
         </div>
 
+        {/* Cari Desa Field */}
         <div>
           <label className={labelCls}>
             Cari desa / kelurahan {hasVillages ? <span className="opacity-75 font-normal">({totalVillages} desa di {villages.length} kecamatan)</span> : ''}
           </label>
           <input
             type="text"
-            placeholder="Ketik nama desa atau kecamatan"
+            placeholder={isAuthenticated ? "Ketik nama desa atau kecamatan" : "Login Google terlebih dahulu"}
             value={filter}
             onChange={e => setFilter(e.target.value)}
-            disabled={!hasVillages}
+            disabled={!hasVillages || !isAuthenticated}
             className={inputCls}
           />
         </div>
 
+        {/* Pilihan Desa */}
         <div>
           <label className={labelCls}>
             Desa / Kelurahan * {cityName ? <span className="text-blue-500 font-semibold">({cityName})</span> : ''}
@@ -286,11 +445,15 @@ export default function FloodInputPanel({
             value={desaKode}
             onChange={e => setDesaKode(e.target.value)}
             required
-            disabled={!hasVillages}
-            className={clsx(inputCls, 'cursor-pointer')}
+            disabled={!hasVillages || !isAuthenticated}
+            className={clsx(inputCls, isAuthenticated && 'cursor-pointer')}
           >
             <option value="">
-              {hasVillages ? `Pilih desa / kelurahan (${totalVillages} desa)...` : loading ? 'Memuat data desa...' : 'Belum ada data desa untuk wilayah ini'}
+              {!isAuthenticated
+                ? '🔒 Login dengan Google untuk memilih desa...'
+                : hasVillages
+                  ? `Pilih desa / kelurahan (${totalVillages} desa)...`
+                  : loading ? 'Memuat data desa...' : 'Belum ada data desa untuk wilayah ini'}
             </option>
             {visibleGroups.map(group => (
               <optgroup key={group.kecamatan_kode} label={groupLabel(group, showKota)}>
@@ -309,6 +472,7 @@ export default function FloodInputPanel({
           )}
         </div>
 
+        {/* Status Banjir */}
         <div>
           <label className={labelCls}>Status Banjir *</label>
           <div className="grid grid-cols-4 gap-1.5">
@@ -319,6 +483,7 @@ export default function FloodInputPanel({
                 selected={floodLevel}
                 onSelect={setFloodLevel}
                 isDark={isDark}
+                disabled={!isAuthenticated}
               />
             ))}
           </div>
@@ -329,13 +494,15 @@ export default function FloodInputPanel({
           )}
         </div>
 
+        {/* Catatan Tambahan */}
         <div>
           <label className={labelCls}>Catatan Tambahan</label>
           <textarea
             rows={2}
-            placeholder="Kondisi lapangan, jalur terputus, dll."
+            placeholder={isAuthenticated ? "Kondisi lapangan, jalur terputus, dll." : "Login Google untuk menambahkan catatan..."}
             value={notes}
             onChange={e => setNotes(e.target.value)}
+            disabled={!isAuthenticated}
             className={clsx(inputCls, 'resize-none')}
           />
         </div>
@@ -359,38 +526,52 @@ export default function FloodInputPanel({
           </div>
         )}
 
-        <button
-          type="submit"
-          disabled={submitting || !desaKode || !hasVillages}
-          className={clsx(
-            'w-full flex items-center justify-center gap-2 py-2.5 px-4',
-            'rounded-xl font-semibold text-sm text-white transition-all',
-            submitting || !desaKode || !hasVillages
-              ? 'bg-gray-600 cursor-not-allowed opacity-60'
-              : 'bg-blue-600 hover:bg-blue-500 active:scale-[0.98]'
-          )}
-        >
-          {submitted ? (
-            <>
-              <CheckCircle2 size={15} />
-              Laporan Terkirim!
-            </>
-          ) : submitting ? (
-            <>
-              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              Mengirim...
-            </>
-          ) : (
-            <>
-              <Send size={15} />
-              Kirim Laporan Lapangan
-            </>
-          )}
-        </button>
+        {/* Submit or Google Login Button */}
+        {!isAuthenticated ? (
+          <button
+            type="button"
+            onClick={openAuthModal}
+            className="w-full flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl font-bold text-sm bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-500/25 active:scale-[0.99] transition-all cursor-pointer"
+          >
+            <GoogleIcon size={18} />
+            <span>Login with Google untuk Submit Laporan</span>
+          </button>
+        ) : (
+          <button
+            type="submit"
+            disabled={submitting || !desaKode || !hasVillages}
+            className={clsx(
+              'w-full flex items-center justify-center gap-2 py-2.5 px-4',
+              'rounded-xl font-semibold text-sm text-white transition-all',
+              submitting || !desaKode || !hasVillages
+                ? 'bg-gray-600 cursor-not-allowed opacity-60'
+                : 'bg-blue-600 hover:bg-blue-500 active:scale-[0.98] shadow-md shadow-blue-600/20 cursor-pointer'
+            )}
+          >
+            {submitted ? (
+              <>
+                <CheckCircle2 size={15} />
+                Laporan Terkirim!
+              </>
+            ) : submitting ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Mengirim Laporan...
+              </>
+            ) : (
+              <>
+                <Send size={15} />
+                Kirim Laporan Lapangan ({user.name.split(' ')[0]})
+              </>
+            )}
+          </button>
+        )}
       </form>
 
+      {/* Riwayat Laporan Lapangan */}
       {reports.length > 0 && (
-        <div className="space-y-2">
+        <div className="space-y-2 pt-2 border-t border-dashed"
+             style={{ borderColor: isDark ? '#374151' : '#e5e7eb' }}>
           <div className="flex items-center justify-between">
             <p className={clsx('text-xs font-semibold uppercase tracking-wider',
               isDark ? 'text-gray-500' : 'text-gray-400'
@@ -401,7 +582,7 @@ export default function FloodInputPanel({
               type="button"
               onClick={onClear}
               className={clsx(
-                'flex items-center gap-1 text-xs transition-colors',
+                'flex items-center gap-1 text-xs transition-colors cursor-pointer',
                 isDark
                   ? 'text-gray-600 hover:text-gray-400'
                   : 'text-gray-400 hover:text-gray-600'
@@ -411,7 +592,7 @@ export default function FloodInputPanel({
               Reset
             </button>
           </div>
-          <div className="space-y-2 max-h-52 overflow-y-auto">
+          <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
             {reports.map(r => (
               <ReportCard key={r.id} report={r} isDark={isDark} />
             ))}

@@ -1,7 +1,9 @@
-import { RefreshCw, Wifi, WifiOff, Clock, Sun, Moon, Map, FileText, Search } from 'lucide-react'
+import { RefreshCw, Wifi, WifiOff, Clock, Sun, Moon, Map, FileText, Search, BadgeCheck, LogOut } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import { useTheme } from '../lib/ThemeContext.jsx'
+import { useAuth } from '../lib/AuthContext.jsx'
+import GoogleIcon from './GoogleIcon.jsx'
 
 export default function Header({
   selectedCity, cities, onCityChange,
@@ -9,6 +11,7 @@ export default function Header({
   currentPath = '/', onNavigate = () => { },
 }) {
   const { theme, toggleTheme } = useTheme()
+  const { user, isAuthenticated, openAuthModal, logout } = useAuth()
   const isDark = theme === 'dark'
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
@@ -195,6 +198,50 @@ export default function Header({
           )
         }
 
+        {/* Officer Auth Status */}
+        {isAuthenticated && user ? (
+          <div className={clsx(
+            'flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-xs',
+            isDark ? 'bg-gray-800 border-gray-700 text-gray-200' : 'bg-gray-100 border-gray-300 text-gray-800'
+          )}>
+            {user.picture ? (
+              <img
+                src={user.picture}
+                alt={user.name}
+                className="w-5 h-5 rounded-full object-cover border border-blue-400 shrink-0"
+              />
+            ) : (
+              <BadgeCheck size={13} className="text-blue-500 shrink-0" />
+            )}
+            <span className="font-semibold hidden lg:inline truncate max-w-[100px]">
+              {user.name.split(' ')[0]}
+            </span>
+            <button
+              type="button"
+              onClick={logout}
+              title="Logout Petugas"
+              className="text-gray-400 hover:text-red-400 p-0.5 transition-colors cursor-pointer"
+            >
+              <LogOut size={11} />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={openAuthModal}
+            title="Login Petugas BPBD"
+            className={clsx(
+              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-semibold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer',
+              isDark
+                ? 'bg-gray-800 hover:bg-gray-700 border-gray-700 text-gray-200'
+                : 'bg-white hover:bg-gray-50 border-gray-300 text-gray-800'
+            )}
+          >
+            <GoogleIcon size={13} />
+            <span className="hidden sm:inline">Login Petugas</span>
+          </button>
+        )}
+
         {/* Dark/Light toggle */}
         <button
           onClick={toggleTheme}
@@ -202,7 +249,7 @@ export default function Header({
           className={clsx(
             'p-1.5 rounded-lg transition-colors',
             isDark
-              ? 'bg-gray-800 hover:bg-gray-700 text-yellow-400'
+              ? 'bg-gray-800 hover:bg-gray-750 text-yellow-400'
               : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
           )}
         >

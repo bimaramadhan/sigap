@@ -10,6 +10,7 @@ import VulnerabilityCard from './components/VulnerabilityCard.jsx'
 import NarasiPanel from './components/NarasiPanel.jsx'
 import FloodReportPanel from './components/FloodReportPanel.jsx'
 import ReportPage from './components/ReportPage.jsx'
+import GoogleAuthModal from './components/GoogleAuthModal.jsx'
 import { useAnalysis } from './hooks/useAnalysis.js'
 import { useFloodReports } from './hooks/useFloodReports.js'
 import { MOCK_CITIES } from './lib/mockData.js'
@@ -426,6 +427,9 @@ export default function App() {
 
       {/* Toast notification */}
       {toast && <Toast message={toast.message} type={toast.type} isDark={isDark} />}
+
+      {/* Global Google Authentication Modal */}
+      <GoogleAuthModal />
 
     </div>
   )

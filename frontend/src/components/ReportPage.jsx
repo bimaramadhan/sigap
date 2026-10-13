@@ -21,12 +21,17 @@ import {
   ShieldAlert,
   ClipboardList,
   MapPin,
+  BadgeCheck,
+  LogOut,
+  LogIn,
 } from 'lucide-react'
 import clsx from 'clsx'
 
 import NarasiPanel from './NarasiPanel.jsx'
 import FloodInputPanel from './FloodInputPanel.jsx'
+import GoogleIcon from './GoogleIcon.jsx'
 import { useTheme } from '../lib/ThemeContext.jsx'
+import { useAuth } from '../lib/AuthContext.jsx'
 
 export default function ReportPage({
   selectedCity,
@@ -43,6 +48,7 @@ export default function ReportPage({
   onNavigate,
 }) {
   const { theme } = useTheme()
+  const { user, isAuthenticated, openAuthModal, logout } = useAuth()
   const isDark = theme === 'dark'
 
   // View mode: 'both' | 'briefing' | 'laporan'
@@ -154,6 +160,51 @@ export default function ReportPage({
                 <ClipboardList size={13} />
                 <span>{reports.length} Laporan Lapangan</span>
               </div>
+
+              {/* Officer Google Auth Status Pill */}
+              {isAuthenticated && user ? (
+                <div className={clsx(
+                  'flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs transition-all shadow-sm',
+                  isDark
+                    ? 'bg-blue-950/40 border-blue-500/40 text-blue-200'
+                    : 'bg-blue-50 border-blue-200 text-blue-900'
+                )}>
+                  {user.picture ? (
+                    <img
+                      src={user.picture}
+                      alt={user.name}
+                      className="w-5 h-5 rounded-full object-cover border border-blue-400 shrink-0"
+                    />
+                  ) : (
+                    <BadgeCheck size={14} className="text-blue-500 shrink-0" />
+                  )}
+                  <span className="font-semibold truncate max-w-[130px] sm:max-w-[180px]">
+                    {user.name}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={logout}
+                    title="Keluar / Logout Petugas"
+                    className="ml-0.5 text-gray-400 hover:text-red-400 transition-colors p-0.5 rounded cursor-pointer"
+                  >
+                    <LogOut size={12} />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={openAuthModal}
+                  className={clsx(
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer',
+                    isDark
+                      ? 'bg-gray-800 hover:bg-gray-750 border-gray-700 text-white'
+                      : 'bg-white hover:bg-gray-50 border-gray-300 text-gray-800'
+                  )}
+                >
+                  <GoogleIcon size={14} />
+                  <span>Login Petugas</span>
+                </button>
+              )}
             </div>
 
           </div>

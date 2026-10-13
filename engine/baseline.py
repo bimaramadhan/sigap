@@ -130,30 +130,46 @@ def ensure_baseline(city: str, force: bool = False) -> dict:
 
 
 def _ensure_baseline_filecache(kab_kode: str) -> dict:
-    """Fallback tanpa Postgres — pakai inarisk_loader dengan file cache 24 jam."""
-    from pipeline.inarisk_loader import get_features_for_vulnerability
-    from engine.wilayah import lookup_kab
+    """
+    Fallback tanpa Postgres — fetch InaRisk dengan bbox + label dari katalog
+    wilayah, sama seperti _fetch_and_store tapi tanpa simpan ke DB.
+    """
+    from datetime import datetime, timezone
+    from pipeline.inarisk_loader import get_all_features, to_vulnerability_format
 
-    kab_info = lookup_kab(kab_kode)
-    label    = kab_info["label"] if kab_info else kab_kode
+    kab = lookup_kab(kab_kode)
+    if not kab:
+        raise ValueError(f"Kab/kota '{kab_kode}' tidak ada di katalog wilayah")
 
-    logger.debug(f"  baseline fallback (no DB): {label}")
-    features = get_features_for_vulnerability(kab_kode)
-    if not features.get("config"):
-        bbox = resolve_bbox(kab_kode) or [0, 0, 0, 0]
-        features["config"] = {
-            "label":    label,
-            "province": kab_info["province"] if kab_info else "",
-            "bbox":     bbox,
-        }
+    bbox = resolve_bbox(kab_kode)
+    if len(bbox) != 4:
+        raise ValueError(f"Batas peta untuk {kab['label']} belum tersedia")
+
+    logger.debug(f"  baseline fallback (no DB): {kab['label']}")
+
+    # Fetch InaRisk dengan bbox + label eksplisit (bukan nama kota via CITY_BOUNDS)
+    raw = get_all_features(
+        kab_kode,
+        bbox=bbox,
+        label=kab["label"],
+        province=kab["province"],
+    )
+    features = to_vulnerability_format(kab_kode, raw)
+    features["config"] = {
+        "label":    kab["label"],
+        "province": kab["province"],
+        "bbox":     bbox,
+    }
+
+    now = datetime.now(timezone.utc)
     return {
         "kab_kode":       kab_kode,
         "features":       features,
         "features_json":  features,
         "base_score":     0,            # scored live in scoring.py
         "polygons_json":  None,
-        "fetched_at":     __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
-        "fetched_at_iso": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "fetched_at":     now,
+        "fetched_at_iso": now.isoformat(),
         "age_hours":      0,
         "source":         "file-cache",
     }
@@ -168,7 +184,8 @@ def get_polygons(city: str, force: bool = False) -> dict:
     # Fallback tanpa DB → query inarisk_polygon langsung (punya file cache sendiri)
     if not db_available():
         from pipeline.inarisk_polygon import get_flood_polygons
-        return get_flood_polygons(kab)
+        bbox = resolve_bbox(kab)
+        return get_flood_polygons(kab, bbox=bbox)
 
     cached = load_baseline(kab, with_polygons=True)
     fresh = bool(cached) and baseline_is_fresh(cached["fetched_at"])

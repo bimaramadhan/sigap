@@ -703,16 +703,17 @@ def get_vulnerability_map(city: str):
             return cached
 
     try:
-        from pipeline.inarisk_polygon import get_flood_polygons as _get_polygons
-        from engine.vulnerability     import (
-            calculate_from_cache_or_ee, WEIGHTS, NORM, SCORE_CATEGORIES
-        )
+        from engine.scoring       import score_city
+        from engine.baseline      import get_polygons as _get_polygons
+        from engine.vulnerability import WEIGHTS, NORM, SCORE_CATEGORIES
 
         # ── 1. Ambil city-level vulnerability (dengan semua boosts) ───────────
-        city_result = calculate_from_cache_or_ee(
+        # Pakai score_city (jalur baru, paham kode wilayah 33.74)
+        city_result, _, _ = score_city(
             city,
             include_weather=True,
             include_alerts=True,
+            include_field=True,
         )
 
         city_base         = city_result.score - city_result.weather_boost - city_result.alert_boost
@@ -721,7 +722,7 @@ def get_vulnerability_map(city: str):
         weather_boost     = city_result.weather_boost
         alert_boost       = city_result.alert_boost
 
-        # ── 2. Ambil polygon kecamatan (cache 7 hari) ──────────────────────────
+        # ── 2. Ambil polygon kecamatan (via baseline, paham kode wilayah) ─────
         polygons = _get_polygons(city)
 
         # ── 3. Hitung score per kecamatan ──────────────────────────────────────

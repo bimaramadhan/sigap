@@ -363,33 +363,61 @@ def _estimate_population(pop_stats: dict, bbox: list[float]) -> int:
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
-def get_all_features(city: str, force_refresh: bool = False) -> dict:
+def _sample_block(city: str) -> dict:
+    """Sample fallback. Kota di luar empat demo memakai angka netral, bukan Semarang."""
+    if city in SAMPLE_DATA:
+        return SAMPLE_DATA[city]
+    mapped = {
+        "33.74": "semarang",
+        "32.75": "bekasi",
+        "35.78": "surabaya",
+        "31.71": "jakarta",
+        "31.72": "jakarta",
+        "31.73": "jakarta",
+        "31.74": "jakarta",
+        "31.75": "jakarta",
+    }.get(city)
+    if mapped:
+        return SAMPLE_DATA[mapped]
+    return {
+        "flood_hazard":   {"mean": 0.0, "max": 0.0, "min": 0.0, "high_ratio": 0.0, "n_samples": 0},
+        "vulnerability":  {"mean": 0.0, "max": 0.0, "min": 0.0, "n_samples": 0},
+        "capacity":       {"mean": 0.5, "max": 0.5, "min": 0.5, "n_samples": 0},
+        "population":     {"mean": 0.0, "total_est": 0, "n_samples": 0},
+    }
+
+
+def get_all_features(
+    city: str,
+    force_refresh: bool = False,
+    bbox: list | None = None,
+    label: str | None = None,
+    province: str | None = None,
+) -> dict:
     """
     Ambil semua fitur InaRisk untuk satu kota.
 
-    Menggantikan atau melengkapi ee_loader.get_all_features().
-    Output format compatible dengan vulnerability.py.
-
-    Args:
-        city:          Nama kota (semarang/bekasi/jakarta)
-        force_refresh: Paksa refresh meski cache masih valid
-
-    Returns:
-        Dict dengan: flood_hazard, vulnerability, capacity, population,
-                     flood_ratio, _source, _is_sample
+    Kota demo boleh dipanggil dengan slug. Kota lain wajib membawa bbox.
     """
     city = city.lower()
-    if city not in CITY_BOUNDS:
-        raise ValueError(f"City '{city}' tidak dikenal. Pilihan: {list(CITY_BOUNDS)}")
+    if bbox is None:
+        if city not in CITY_BOUNDS:
+            raise ValueError(f"City '{city}' tidak dikenal. Pilihan: {list(CITY_BOUNDS)}")
+        cfg = CITY_BOUNDS[city]
+        bbox = cfg["bbox"]
+    else:
+        known = CITY_BOUNDS.get(city, {})
+        cfg = {
+            "bbox":     list(bbox),
+            "label":    label or known.get("label") or city,
+            "province": province or known.get("province") or "",
+        }
 
     if not force_refresh:
         cached = _load_cache(city, "all_features")
         if cached:
             logger.info(f"  InaRisk cache hit: {city}")
             return cached
-
-    cfg  = CITY_BOUNDS[city]
-    bbox = cfg["bbox"]
 
     logger.info(f"  Querying InaRisk untuk {cfg['label']}...")
     results = {"city": city, "config": cfg}
@@ -398,6 +426,8 @@ def get_all_features(city: str, force_refresh: bool = False) -> dict:
     logger.info("  [1/4] INDEKS_BAHAYA_BANJIR...")
     try:
         hazard = _query_layer_grid("INDEKS_BAHAYA_BANJIR", bbox, step=0.02)
+        if hazard.get("n_samples", 0) == 0:
+            raise ValueError("tidak ada sampel bahaya")
         hazard["high_ratio"]   = _compute_flood_ratio(hazard, threshold=0.6)
         hazard["medium_ratio"] = _compute_flood_ratio(hazard, threshold=0.3)
         hazard["_source"]      = "InaRisk BNPB — INDEKS_BAHAYA_BANJIR"
@@ -405,7 +435,7 @@ def get_all_features(city: str, force_refresh: bool = False) -> dict:
         logger.success(f"    Hazard mean={hazard['mean']:.3f}, high_ratio={hazard['high_ratio']:.1%}")
     except Exception as e:
         logger.warning(f"    Flood hazard gagal: {e} → pakai sample")
-        results["flood_hazard"] = {**SAMPLE_DATA[city]["flood_hazard"], "_fallback": True}
+        results["flood_hazard"] = {**_sample_block(city)["flood_hazard"], "_fallback": True}
 
     # ── Layer 2: Capacity (biasanya cepat) ────────────────────────────────────
     logger.info("  [2/4] INDEKS_KAPASITAS_2021...")
@@ -416,7 +446,7 @@ def get_all_features(city: str, force_refresh: bool = False) -> dict:
         logger.success(f"    Capacity mean={cap['mean']:.3f}")
     except Exception as e:
         logger.warning(f"    Capacity gagal: {e} → pakai sample")
-        results["capacity"] = {**SAMPLE_DATA[city]["capacity"], "_fallback": True}
+        results["capacity"] = {**_sample_block(city)["capacity"], "_fallback": True}
 
     # ── Layer 3: Population ───────────────────────────────────────────────────
     logger.info("  [3/4] INARISKPOP_2020...")
@@ -429,7 +459,7 @@ def get_all_features(city: str, force_refresh: bool = False) -> dict:
         # pakai sample data (InaRisk kadang return NoData untuk seluruh area)
         if pop.get("n_samples", 0) == 0 or pop.get("total_est", 0) == 0:
             logger.warning(f"    Population query returned 0 — pakai sample data")
-            samp = SAMPLE_DATA.get(city, {}).get("population", {})
+            samp = _sample_block(city).get("population", {})
             if samp:
                 pop.update(samp)
                 pop["_fallback"] = True
@@ -440,7 +470,7 @@ def get_all_features(city: str, force_refresh: bool = False) -> dict:
         logger.success(f"    Population total_est={pop['total_est']:,}")
     except Exception as e:
         logger.warning(f"    Population gagal: {e} → pakai sample")
-        results["population"] = {**SAMPLE_DATA[city]["population"], "_fallback": True}
+        results["population"] = {**_sample_block(city)["population"], "_fallback": True}
 
     # ── Layer 4: Vulnerability (paling lambat, terakhir) ─────────────────────
     logger.info("  [4/5] INDEKS_KERENTANAN_BANJIR (bisa lambat)...")
@@ -451,7 +481,7 @@ def get_all_features(city: str, force_refresh: bool = False) -> dict:
         logger.success(f"    Vulnerability mean={vuln['mean']:.3f}")
     except Exception as e:
         logger.warning(f"    Vulnerability gagal: {e} → pakai sample")
-        results["vulnerability"] = {**SAMPLE_DATA[city]["vulnerability"], "_fallback": True}
+        results["vulnerability"] = {**_sample_block(city)["vulnerability"], "_fallback": True}
 
     # ── Layer 5: Flood Risk (indeks risiko final dari BNPB) ───────────────────
     logger.info("  [5/6] layer_risiko_banjir (indeks risiko FINAL BNPB)...")
@@ -654,7 +684,31 @@ def to_vulnerability_format(city: str, inarisk_data: dict) -> dict:
         Dict compatible dengan ee_loader.get_all_features() format
     """
     city    = city.lower()
-    static  = _CITY_STATIC.get(city, _CITY_STATIC["semarang"])
+    static_key = {
+        "33.74": "semarang",
+        "32.75": "bekasi",
+        "35.78": "surabaya",
+        "31.71": "jakarta",
+        "31.72": "jakarta",
+        "31.73": "jakarta",
+        "31.74": "jakarta",
+        "31.75": "jakarta",
+    }.get(city, city)
+    static = _CITY_STATIC.get(static_key) or {
+        "dem": {
+            "elevation_mean": 25.0,
+            "elevation_min":  2.0,
+            "elevation_max":  200.0,
+            "elevation_std":  30.0,
+            "source": "perkiraan umum — belum ada DEM khusus kota ini",
+        },
+        "flood_history": {
+            "historical_events": 0,
+            "avg_per_year":      0.0,
+            "period":            "2000-2018",
+            "source":            "belum ada data historis kota ini",
+        },
+    }
     cfg     = inarisk_data.get("config", CITY_BOUNDS.get(city, {}))
     bbox    = cfg.get("bbox", [0, 0, 0, 0])
     is_samp = inarisk_data.get("_is_sample", True)

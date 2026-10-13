@@ -140,6 +140,7 @@ def _simplify_polygon(rings: list, tolerance: float = 0.0005) -> list:
     Simplifikasi polygon dengan Douglas-Peucker sederhana.
     Mengurangi jumlah titik untuk performa Leaflet lebih baik.
     Tolerance dalam derajat (0.0005 ≈ 50 meter).
+    Minimum 4 titik dipertahankan agar polygon tetap valid.
     """
     def dp_simplify(points: list, tol: float) -> list:
         if len(points) <= 2:
@@ -165,7 +166,15 @@ def _simplify_polygon(rings: list, tolerance: float = 0.0005) -> list:
             return left[:-1] + right
         return [start, end]
 
-    return [dp_simplify(ring, tolerance) for ring in rings]
+    result = []
+    for ring in rings:
+        simplified = dp_simplify(ring, tolerance)
+        # Polygon valid butuh minimal 4 titik (3 vertex + penutup)
+        # Kalau terlalu disederhanakan, kembalikan titik asli
+        if len(simplified) < 4:
+            simplified = ring
+        result.append(simplified)
+    return result
 
 
 # ── Flood Hazard per Point ────────────────────────────────────────────────────
@@ -215,7 +224,7 @@ def _get_hazard_values(points: list[tuple]) -> dict[int, float]:
 
 
 # ── Main Function ─────────────────────────────────────────────────────────────
-def get_flood_polygons(city: str, force_refresh: bool = False) -> dict:
+def get_flood_polygons(city: str, force_refresh: bool = False, bbox: list | None = None) -> dict:
     """
     Ambil polygon kecamatan dengan nilai Indeks Bahaya Banjir.
 
@@ -237,16 +246,16 @@ def get_flood_polygons(city: str, force_refresh: bool = False) -> dict:
           - color (str):      Hex color untuk peta
     """
     city = city.lower()
-    if city not in CITY_BOUNDS:
-        raise ValueError(f"City '{city}' tidak dikenal. Pilihan: {list(CITY_BOUNDS)}")
+    if bbox is None:
+        if city not in CITY_BOUNDS:
+            raise ValueError(f"City '{city}' tidak dikenal. Pilihan: {list(CITY_BOUNDS)}")
+        bbox = CITY_BOUNDS[city]
 
     if not force_refresh:
         cached = _load_cache(city)
         if cached:
             logger.info(f"  Polygon cache hit: {city} ({len(cached.get('features', []))} kecamatan)")
             return cached
-
-    bbox = CITY_BOUNDS[city]
     logger.info(f"  Fetching kecamatan polygons untuk {city}...")
 
     # ── Step 1: Query batas kecamatan ─────────────────────────────────────────
@@ -327,6 +336,14 @@ def get_flood_polygons(city: str, force_refresh: bool = False) -> dict:
         simplified_rings = _simplify_polygon(kec["rings"], tolerance=0.0003)
         # Simpan dalam format standard GeoJSON [lon, lat]
         geojson_rings = _rings_to_geojson(simplified_rings)
+
+        # Skip feature jika geometry tidak valid (< 4 titik di semua rings)
+        valid_rings = [r for r in geojson_rings if len(r) >= 4]
+        if not valid_rings:
+            logger.warning(f"  Skip {kec['name']}: invalid geometry ({sum(len(r) for r in geojson_rings)} total points)")
+            continue
+
+        geojson_rings = valid_rings
 
         # Geometry type: Polygon jika 1 ring, MultiPolygon jika lebih
         if len(geojson_rings) == 1:

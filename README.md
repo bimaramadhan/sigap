@@ -1,316 +1,188 @@
 # SIGAP — Sistem Integrasi Geospasial Aksi Penanggulangan Bencana
 
-> **Flood Response Decision Engine** — AI-powered disaster coordination for Indonesia
+> **AI-powered Flood Response Decision Engine** untuk koordinator BPBD Indonesia
 >
-> SIGAP bukan sistem prediksi banjir. SIGAP mengambil prediksi yang sudah ada
-> dan menjawab pertanyaan yang belum pernah dijawab:
-> **siapa harus melakukan apa, kapan, dan dalam urutan apa.**
+> SIGAP bukan sistem prediksi banjir. SIGAP mengambil data dari BMKG dan InaRisk BNPB,
+> lalu menjawab pertanyaan yang selama ini tidak terjawab:
+> **siapa evakuasi duluan, berapa perahu dibutuhkan, dan apa yang harus dilakukan sekarang.**
 
 ---
 
 ## Daftar Isi
 
 - [Latar Belakang](#latar-belakang)
-- [Arsitektur Sistem](#arsitektur-sistem)
+- [Cara Kerja](#cara-kerja)
+- [Arsitektur](#arsitektur)
 - [Data Sources](#data-sources)
-- [Bagaimana AI Bekerja](#bagaimana-ai-bekerja)
-- [Status Komponen](#status-komponen)
-- [Struktur Project](#struktur-project)
-- [Setup & Cara Menjalankan](#setup--cara-menjalankan)
+- [Vulnerability Score](#vulnerability-score)
+- [Setup & Menjalankan](#setup--menjalankan)
 - [API Endpoints](#api-endpoints)
-- [Kota yang Didukung](#kota-yang-didukung)
-- [Knowledge Base](#knowledge-base)
-- [Roadmap](#roadmap)
-- [Tim](#tim)
+- [Struktur Project](#struktur-project)
+- [Status Komponen](#status-komponen)
 
 ---
 
 ## Latar Belakang
 
 Indonesia mencatat **3.472 kejadian bencana** (2024), 99% hidrometeorologis.
-**5,7 juta jiwa** terdampak banjir. Budget BNPB turun 97% sejak 2020.
+**5,7 juta jiwa** terdampak banjir setiap tahun. Budget BNPB turun 97% sejak 2020.
 
 Masalah bukan prediksi — BMKG sudah punya sistem peringatan dini yang baik.
 Masalahnya adalah **jeda antara peringatan dan tindakan**. Koordinator BPBD masih
-mengkoordinasikan evakuasi lewat telepon manual, mengirim resource berdasarkan
-intuisi, dan tidak tahu siapa yang paling rentan di zona banjir.
+mengkoordinasikan evakuasi lewat telepon manual, mengirim resource berdasarkan intuisi,
+dan tidak tahu siapa yang paling rentan di zona banjir.
 
-SIGAP mengisi jeda itu.
+SIGAP mengisi jeda itu dengan mengintegrasikan tiga sumber data menjadi satu keputusan.
 
 ---
 
-## Arsitektur Sistem
+## Cara Kerja
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         DATA SOURCES                                │
-│                                                                     │
-│  BMKG Nowcast API ──────────────────────┐  ✅ Real-time, no auth   │
-│  BMKG Prakiraan Cuaca API ──────────────┤  ✅ Real-time, no auth   │
-│  InaRisk BNPB GIS ─────────────────────┘  ✅ Live, no auth         │
-│    • INDEKS_BAHAYA_BANJIR (100m raster)                             │
-│    • layer_risiko_banjir  (composite risk — BNPB final index)       │
-│    • SLR                  (Sea Level Rise, 30m)                     │
-│    • INDEKS_KAPASITAS_2021                                          │
-│    • INARISKPOP_2020                                                │
-│    • batas_administrasi   (polygon kecamatan + kabupaten/kota)      │
-│                                                                     │
-│  Google Earth Engine ──────────────── ⚠️  Fallback, butuh auth     │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                          AI ENGINE                                  │
-│                                                                     │
-│  vulnerability.py ── Weighted scoring 5 komponen (0-100)           │
-│  + weather_boost    ── BMKG curah hujan 12 jam (0-25 poin)         │
-│  + alert_boost      ── BMKG alert severity (0-25 poin)             │
-│  + field_report_boost ── Laporan BPBD lapangan (0-30 poin)         │
-│       │                                                             │
-│       ▼                                                             │
-│  narrator.py ── Gemini 1.5 Flash + RAG knowledge base              │
-│               → Narasi bahasa Indonesia, actionable                 │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                        SERVING LAYER                                │
-│                                                                     │
-│  FastAPI (api/main.py) — localhost:8080                             │
-│  React + Vite (frontend/) — localhost:3000                          │
-│    • Peta OpenStreetMap + polygon kecamatan dari InaRisk BNPB       │
-│    • Dashboard koordinator BPBD                                     │
-│    • Form laporan lapangan (input TMA sungai, area genangan)        │
-│    • Dark/Light mode                                                │
-│    • Search 514 kota/kabupaten Indonesia                            │
-└─────────────────────────────────────────────────────────────────────┘
+BMKG Alert Severe masuk
+        ↓
+Score Semarang: 49 → 64 (SIAGA) — otomatis dalam 30 detik
+        ↓
+Petugas lapangan submit laporan TMA Banjirkanal: Siaga
+        ↓
+Score: 64 → 79 (AWAS) — langsung
+        ↓
+Gemini AI: "Evakuasi 8.500 jiwa dari Tawangmas, deploy 12 perahu ke Semarang Utara"
+        ↓
+Koordinator BPBD baca, klik, eksekusi.
+```
+
+Total waktu dari data masuk ke keputusan: **< 60 detik**.
+
+---
+
+## Arsitektur
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                     DATA SOURCES                        │
+│                                                         │
+│  BMKG Nowcast API ────────── ✅ Real-time, no auth      │
+│  BMKG Prakiraan Cuaca ──────── ✅ Real-time, no auth    │
+│  InaRisk BNPB GIS ─────────── ✅ Live, no auth         │
+│    • INDEKS_BAHAYA_BANJIR                               │
+│    • layer_risiko_banjir (BNPB final composite)         │
+│    • INARISKPOP_2020                                    │
+│    • batas_administrasi (polygon kecamatan)             │
+│  Kemendagri Wilayah ────────── 📋 90k+ kode wilayah    │
+│  Google Earth Engine ────────── ⚠️ Fallback only       │
+└──────────────────┬──────────────────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────────────────┐
+│                    SIGAP ENGINE                         │
+│                                                         │
+│  vulnerability.py ── Weighted score 0-100               │
+│    base (InaRisk statis)                                │
+│    + weather_boost (0-25, BMKG real-time)               │
+│    + alert_boost   (0-25, BMKG real-time)               │
+│    + field_boost   (0-30, laporan BPBD)                 │
+│                                                         │
+│  scoring.py ──── Orkestrasi semua komponen              │
+│  narrator.py ─── Gemini AI → narasi bahasa Indonesia    │
+│  baseline.py ─── InaRisk cache management (7 hari)     │
+│  wilayah.py ──── Katalog 90k+ kode wilayah Indonesia   │
+└──────────────────┬──────────────────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────────────────┐
+│                  SERVING LAYER                          │
+│                                                         │
+│  FastAPI v0.4.0 — localhost:8080 (16 endpoints)         │
+│  React + Vite — localhost:3000                          │
+│    • Peta OpenStreetMap + polygon kecamatan InaRisk     │
+│    • Vulnerability score per kecamatan (klik polygon)   │
+│    • Form laporan lapangan desa/kelurahan               │
+│    • Search 514+ kab/kota Indonesia                     │
+│                                                         │
+│  PostgreSQL 16 (Docker Compose) — port 5432             │
+│    • wilayah + wilayah_profil (katalog Kemendagri)      │
+│    • flood_reports (laporan lapangan BPBD)              │
+│    • inarisk_baselines (cache InaRisk 7 hari)           │
+│    • weather_cache (cache BMKG 6 jam)                   │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Data Sources
 
-### Tersedia Sekarang (Tanpa Setup Apapun)
+### Live / Real-time
 
-| Data | Sumber | Endpoint | Status |
+| Data | Sumber | Endpoint | Cache |
 |---|---|---|---|
-| **Peringatan dini cuaca** | BMKG Nowcast | `bmkg.go.id/alerts/nowcast/id` | ✅ Real-time |
-| **Prakiraan cuaca per kecamatan** | BMKG Prakiraan | `api.bmkg.go.id/publik/prakiraan-cuaca?adm4=...` | ✅ Update 2x/hari |
-| **Indeks Bahaya Banjir** | InaRisk BNPB | `...INDEKS_BAHAYA_BANJIR` | ✅ 100m, seluruh Indonesia |
-| **Indeks Risiko Banjir (final)** | InaRisk BNPB | `...layer_risiko_banjir` | ✅ Composite BNPB, 100m |
-| **Sea Level Rise index** | InaRisk BNPB | `...SLR` | ✅ 30m, penting untuk kota pesisir |
-| **Indeks Kapasitas Daerah** | InaRisk BNPB | `...INDEKS_KAPASITAS_2021` | ✅ |
-| **Populasi 2020** | InaRisk BNPB | `...INARISKPOP_2020` | ✅ Jiwa per 100m² |
-| **Polygon kecamatan** | InaRisk BNPB | `...batas_administrasi/MapServer/3` | ✅ Seluruh Indonesia |
-| **Registry 514 kota** | InaRisk BNPB | `...batas_administrasi/MapServer/2` | ✅ Semua kabupaten/kota |
+| Alert cuaca | BMKG Nowcast CAP/XML | `bmkg.go.id/alerts/nowcast/id` | 30 menit |
+| Prakiraan cuaca 12 jam | BMKG Prakiraan | `api.bmkg.go.id/publik/prakiraan-cuaca` | 6 jam |
+| Indeks Bahaya Banjir | InaRisk BNPB | `gis.bnpb.go.id/server/rest/services/inarisk` | 7 hari (Postgres) |
+| Indeks Risiko Banjir | InaRisk BNPB | `layer_risiko_banjir` | 7 hari |
+| Polygon kecamatan | InaRisk BNPB | `batas_administrasi/MapServer/3` | 7 hari |
+| Narasi AI | Gemini AI Studio (gratis) | Google AI Studio API | Per-request |
 
-> **`layer_risiko_banjir`** adalah indeks risiko **final** yang sudah dihitung BNPB
-> (hazard × vulnerability ÷ capacity). Lebih akurat daripada menghitung sendiri.
-> Dipakai sebagai `inarisk_score` utama menggantikan formula manual.
+### Referensi / Embedded
 
-> **`SLR` (Sea Level Rise)** sangat relevan untuk kota pesisir:
-> Semarang Utara = **1.0 (maksimum)** — konsisten dengan data subsidence yang diketahui.
-
-### Membutuhkan Setup
-
-| Data | Sumber | Status |
+| Data | Sumber | Keterangan |
 |---|---|---|
-| DEM Elevasi | Google Earth Engine (SRTM) | ⚠️ Fallback dari static data |
-| Historical floods | Google Earth Engine (GFD) | ⚠️ Fallback dari static data |
-| **Narasi AI adaptif** | Gemini 1.5 Flash via Vertex AI | ⚠️ Butuh GCP + gcloud auth |
+| 90k+ kode wilayah | Kemendagri | `knowledge/geografi/wilayah.sql` — provinsi, kab/kota, kecamatan, desa |
+| Pusat & bbox wilayah | Wilayah Geo | `knowledge/geografi/wilayah_level_1_2.sql` |
+| Data populasi | BPS Sensus 2020 | Fallback jika InaRisk INARISKPOP timeout |
+| Kejadian historis | BNPB DIBI 2000-2018 | Hardcoded per kota |
+| Elevasi | SRTM | Hardcoded per kota |
 
-> **Catatan:** InaRisk BNPB menggantikan Google Earth Engine sebagai primary source.
-> Tidak butuh registrasi, API key, atau setup apapun. Lebih relevan untuk Indonesia.
-
----
-
-## Bagaimana AI Bekerja
-
-### Vulnerability Score — Formula Deterministik
-
-Skor 0–100 dihitung dari **5 komponen statis** + **3 boost dinamis**:
-
-```
-Final Score = base_score + weather_boost + alert_boost + field_report_boost
-            = min(100, weighted_sum(5 komponen) × 100 + boosts)
-```
-
-#### Komponen Statis (sumber: InaRisk BNPB)
-
-| Komponen | Bobot | Sumber Data | Yang Diukur |
-|---|---|---|---|
-| Flood Hazard | 30% | INDEKS_BAHAYA_BANJIR | Proporsi area dengan indeks ≥ 0.6 |
-| Population Exposure | 25% | INARISKPOP_2020 | Kepadatan penduduk |
-| Vulnerable Population | 25% | InaRisk + BPS nasional | Estimasi lansia + balita |
-| Historical Frequency | 10% | BNPB DIBI (static) | Frekuensi banjir 2000-2018 |
-| Low Elevation Risk | 10% | SRTM DEM (static) | Area di bawah 5m elevasi |
-
-#### Boost Dinamis (membuat skor responsif terhadap kondisi real-time)
-
-| Boost | Sumber | Max Poin | Trigger |
-|---|---|---|---|
-| **Weather** | BMKG prakiraan cuaca | +25 | Rainfall > 100mm/12jam |
-| **Alert** | BMKG nowcast severity | +25 | Alert EXTREME/SEVERE |
-| **Field Report** | Input manual BPBD | +30 | TMA sungai SIAGA/AWAS |
-| **Total boost cap** | — | +30 | Agar tidak overflow |
-
-**Contoh skenario Semarang:**
-```
-Baseline (InaRisk live):     49.8   → 🟡 WASPADA
-+ Alert BMKG Severe:        +15.0   → 🟠 SIAGA (64.8)
-+ TMA Banjirkanal SIAGA:    +15.0   → 🔴 AWAS (79.8)
-```
-
-#### Level Resmi (sesuai Peraturan BNPB No.2/2024)
-
-| Skor | Level | Simbol |
-|---|---|---|
-| 0–25 | NORMAL | 🟢 Hijau |
-| 25–50 | WASPADA | 🟡 Kuning |
-| 50–75 | SIAGA | 🟠 Oranye |
-| 75–100 | AWAS | 🔴 Merah |
-
-### Narasi AI — Gemini dengan RAG
-
-Vulnerability score (angka) → Gemini 1.5 Flash → narasi bahasa Indonesia:
-
-```
-Input ke Gemini:
-  • Skor 79.8/100 (AWAS)
-  • Populasi 1,653,524 jiwa | 291,021 rentan
-  • Flood area: 46.4% (InaRisk live)
-  • BMKG alert Severe aktif
-  • TMA Banjirkanal Barat: 285cm (SIAGA)
-  • Knowledge base: SOP BPBD, karakteristik kota, regulasi BNPB
-
-Output Gemini (max 300 kata, bahasa Indonesia):
-  "SITUASI AWAS — Kota Semarang menghadapi ancaman banjir serius.
-   Kombinasi hujan lebat dan TMA sungai mendekati batas bahaya...
-   TINDAKAN PRIORITAS:
-   1. Aktifkan Posko Darurat...
-   2. Preposisi 3 perahu ke titik A, B, C..."
-```
-
-**Fallback:** Template rules deterministik jika Gemini tidak tersedia.
+> **Tidak perlu API key untuk InaRisk atau BMKG.** Semua data publik dari lembaga pemerintah.
 
 ---
 
-## Status Komponen
+## Vulnerability Score
 
-### Backend / Pipeline
+Skor 0–100 dihitung dari **5 komponen statis + 3 boost real-time**:
 
-| Komponen | File | Status | Data Source |
+### Komponen Statis (Base Score)
+
+| Komponen | Bobot | Sumber | Normalisasi |
 |---|---|---|---|
-| BMKG alerts | `pipeline/bmkg_ingest.py` | ✅ Real-time | BMKG Nowcast API |
-| BMKG weather | `pipeline/bmkg_weather.py` | ✅ Live | BMKG Prakiraan Cuaca API |
-| InaRisk features | `pipeline/inarisk_loader.py` | ✅ Live | InaRisk BNPB (6 layers) |
-| InaRisk polygons | `pipeline/inarisk_polygon.py` | ✅ On-demand | InaRisk batas_administrasi |
-| City registry | `pipeline/city_registry.py` | ✅ **514 kota Indonesia** | InaRisk batas_administrasi/2 |
-| EE loader | `pipeline/ee_loader.py` | ✅ Fallback only | Google Earth Engine |
-| Vulnerability scorer | `engine/vulnerability.py` | ✅ Aktif | InaRisk (primary) |
-| Flood report store | `engine/flood_report.py` | ✅ Aktif | Input manual BPBD |
-| Gemini narrator | `engine/narrator.py` | ✅ Fallback mode | Butuh GCP auth untuk live |
-| FastAPI | `api/main.py` | ✅ **13 endpoints** | — |
-| POC runner | `run_poc.py` | ✅ Aktif | — |
+| Flood Hazard | 30% | InaRisk INDEKS_BAHAYA_BANJIR | 80% area = skor penuh |
+| Pop. Exposure | 25% | InaRisk INARISKPOP_2020 | 15.000 jiwa/km² = penuh |
+| Pop. Rentan | 25% | BPS: lansia 9.6% + balita 8.0% | 25% rentan = penuh |
+| Historis Banjir | 10% | BNPB DIBI 2000-2018 | 20 events = penuh |
+| Low Elevation | 10% | SRTM DEM | 50% area < 5m = penuh |
 
-### Frontend
+### Boost Real-time
 
-| Komponen | File | Status | Keterangan |
+| Boost | Sumber | Max | Trigger |
 |---|---|---|---|
-| Dashboard layout | `App.jsx` | ✅ | Dark/light mode, 5 tabs |
-| Peta Leaflet | `MapView.jsx` | ✅ | Dual-mode: InaRisk polygon / mock fallback |
-| Weather bar | `WeatherBar.jsx` | ✅ | Strip kondisi cuaca real-time |
-| Alert panel | `AlertPanel.jsx` | ✅ | BMKG alerts dengan severity badge |
-| Vulnerability card | `VulnerabilityCard.jsx` | ✅ | Gauge + breakdown 7 komponen |
-| AI Briefing | `NarasiPanel.jsx` | ✅ | Narasi + action items + resources |
-| Flood input form | `FloodInputPanel.jsx` | ✅ | Input TMA sungai + area genangan |
+| Weather | BMKG prakiraan cuaca | +25 | > 100mm/12jam = +25, > 50mm = +15, > 20mm = +8 |
+| Alert | BMKG Nowcast severity | +25 | Extreme = +25, Severe = +15, Moderate = +8 |
+| Lapangan | Laporan BPBD (desa) | +30 | TMA Awas = +25, Siaga = +15, Waspada = +8 |
 
-### Setup yang Belum Selesai
+> Total boost maksimum: **+30 poin** (di-cap agar tidak overflow).
 
-| Task | Prioritas | Dampak jika belum |
-|---|---|---|
-| `.env` dibuat dari `.env.example` | 🔴 Wajib | Backend tidak bisa jalan |
-| Install gcloud CLI | 🟡 Untuk Gemini | Narasi pakai template (masih OK) |
-| GCP Project + Gemini auth | 🟡 Untuk Gemini | Narasi pakai template |
-| `VITE_USE_MOCK=false` | 🟡 Untuk live frontend | Frontend pakai mock data |
+### Kategori (Peraturan BNPB No. 2 Tahun 2024)
+
+| Skor | Level | Warna | Tindakan |
+|---|---|---|---|
+| 0–25 | 🟢 NORMAL | Hijau | Pantau berkala |
+| 25–50 | 🟡 WASPADA | Kuning | Siapkan rencana kontingensi |
+| 50–75 | 🟠 SIAGA | Oranye | Aktifkan kesiapsiagaan |
+| 75–100 | 🔴 AWAS | Merah | Evakuasi segera |
+
+### Vulnerability Map per Kecamatan
+
+`GET /vulnerability-map/{city}` menghitung skor per kecamatan:
+- Komponen non-hazard (exposure, vulnerable, history, elevation) = dari city score
+- Komponen hazard = nilai InaRisk spesifik kecamatan tersebut
+- Boost cuaca + alert = berlaku sama untuk semua kecamatan dalam satu kota
+
+Hasil: setiap kecamatan punya skor unik berdasarkan risiko lokal.
+Klik polygon di peta → lihat detail score, populasi estimasi, kategori.
 
 ---
 
-## Struktur Project
-
-```
-sigap/
-│
-├── pipeline/                      # Data ingestion
-│   ├── bmkg_ingest.py             # ✅ BMKG alert real-time (nowcast + CAP)
-│   ├── bmkg_weather.py            # ✅ BMKG prakiraan cuaca per kecamatan
-│   ├── inarisk_loader.py          # ✅ InaRisk BNPB: 6 layers (hazard, risk, SLR, dll)
-│   ├── inarisk_polygon.py         # ✅ InaRisk polygon kecamatan + hazard value
-│   ├── city_registry.py           # ✅ Registry 514 kab/kota Indonesia (InaRisk)
-│   └── ee_loader.py               # ✅ Earth Engine (fallback)
-│
-├── engine/                        # Core AI logic
-│   ├── vulnerability.py           # ✅ Scoring 5 komponen + 3 dynamic boosts
-│   ├── narrator.py                # ✅ Gemini narasi + template fallback
-│   └── flood_report.py            # ✅ In-memory store laporan lapangan BPBD
-│
-├── api/
-│   └── main.py                    # ✅ FastAPI 13 endpoints (v0.3.0)
-│
-├── frontend/
-│   ├── src/
-│   │   ├── App.jsx                # Layout utama + dark/light + toast
-│   │   ├── components/
-│   │   │   ├── Header.jsx         # City selector + theme toggle
-│   │   │   ├── WeatherBar.jsx     # Strip cuaca real-time BMKG
-│   │   │   ├── MapView.jsx        # OpenStreetMap + InaRisk polygon overlay
-│   │   │   ├── AlertPanel.jsx     # BMKG alerts
-│   │   │   ├── VulnerabilityCard.jsx
-│   │   │   ├── NarasiPanel.jsx
-│   │   │   └── FloodInputPanel.jsx # Form laporan lapangan BPBD
-│   │   ├── hooks/
-│   │   │   ├── useAnalysis.js
-│   │   │   ├── useFloodReports.js
-│   │   │   └── useFloodPolygons.js
-│   │   └── lib/
-│   │       ├── api.js
-│   │       ├── mockData.js
-│   │       └── ThemeContext.jsx
-│   └── .env.development           # VITE_USE_MOCK=true (default)
-│
-├── knowledge/                     # Knowledge base untuk Gemini RAG
-│   ├── sop/
-│   │   ├── level_siaga_banjir.md
-│   │   ├── status_keadaan_darurat_bnpb.md  # Pedoman BNPB 2016
-│   │   ├── sistem_peringatan_dini_bnpb_2024.md  # Peraturan BNPB No.2/2024
-│   │   ├── rambu_papan_informasi_bnpb_2025.md   # Peraturan BNPB No.3/2025
-│   │   ├── prioritas_evakuasi.md
-│   │   └── kebutuhan_resource.md
-│   ├── kota/
-│   │   └── semarang.md
-│   └── historis/
-│       └── template_kejadian.md
-│
-├── data/
-│   ├── cache/                     # Auto-generated (gitignored)
-│   └── registry/                  # Auto-generated (gitignored)
-│       └── cities.json            # 514 kab/kota Indonesia dari InaRisk
-│
-├── run_poc.py                     # Single entry point
-├── test_bmkg_live.py
-├── test_weather_integration.py
-├── test_inarisk_integration.py
-├── test_registry.py               # Test city registry
-├── extract_pdf.py                 # Utility: ekstrak teks dari PDF
-├── requirements.txt
-├── .env.example
-├── ROADMAP.md
-└── README.md
-```
-
----
-
-## Setup & Cara Menjalankan
+## Setup & Menjalankan
 
 ### Prasyarat
 
@@ -318,127 +190,67 @@ sigap/
 |---|---|---|
 | Python | 3.10+ | [python.org](https://python.org) atau `brew install python@3.11` |
 | Node.js | 18+ | [nodejs.org](https://nodejs.org) atau `brew install node` |
-| Git | any | `brew install git` atau Xcode Command Line Tools |
+| Docker | any | [docker.com](https://docker.com) — untuk PostgreSQL |
 
 ---
 
 ### 🍎 Mac / Linux
 
-#### 1. Clone & masuk folder
-
 ```bash
+# 1. Clone
 git clone https://github.com/bimaramadhan/sigap.git
 cd sigap
-```
 
-#### 2. Setup Python environment
-
-```bash
+# 2. Python environment
 python3 -m venv .venv
 source .venv/bin/activate
-
 pip install -r requirements.txt
-```
 
-> **Apple Silicon (M1/M2/M3)?** Paket geospatial (`geopandas`, `shapely`) sekarang
-> punya binary wheel untuk arm64 — biasanya langsung jalan tanpa Homebrew.
-> Kalau ada error saat install, jalankan dulu:
-> ```bash
-> brew install gdal proj geos
-> ```
-
-#### 3. Buat file `.env`
-
-```bash
+# 3. Konfigurasi
 cp .env.example .env
-open .env          # buka di TextEdit, atau: nano .env / code .env
-```
+# Edit .env: isi GEMINI_API_KEY dari aistudio.google.com
+# Opsional: isi DATABASE_URL jika pakai Cloud SQL
 
-Isi `GEMINI_API_KEY` dengan API key gratis dari [aistudio.google.com](https://aistudio.google.com):
+# 4. Jalankan PostgreSQL
+docker compose up -d
 
-```
-GEMINI_API_KEY=AQ.Ab8RN...   # key dari Google AI Studio
-GEMINI_MODEL=gemini-3.5-flash
-DEMO_MODE=false
-```
-
-#### 4. Jalankan backend
-
-```bash
-# Pastikan .venv masih aktif (ada "(venv)" di awal prompt)
+# 5. Jalankan backend (terminal 1)
 uvicorn api.main:app --reload --port 8080
-```
 
-API docs tersedia di: http://localhost:8080/docs
-
-#### 5. Jalankan frontend (terminal baru)
-
-```bash
+# 6. Jalankan frontend (terminal 2)
 cd frontend
-npm install          # sekali saja
-npm run dev          # buka http://localhost:3000
+npm install
+npm run dev
 ```
 
-Pastikan frontend connect ke backend:
-```bash
-# cek isi file ini
-cat frontend/.env.development
-# harus ada: VITE_USE_MOCK=false
-```
-
-Kalau masih `true`, edit file tersebut:
-```bash
-echo "VITE_USE_MOCK=false" > frontend/.env.development
-```
-
-#### 6. Test cepat data pipeline
-
-```bash
-# Test BMKG real-time (tidak butuh setup apapun)
-python test_bmkg_live.py
-
-# Test InaRisk BNPB
-python test_inarisk_integration.py
-
-# Full pipeline satu kota
-python run_poc.py semarang
-```
+> **Apple Silicon (M1/M2/M3)?** Package geospatial sudah punya binary wheel untuk arm64.
+> Kalau ada error saat install: `brew install gdal proj geos` lalu ulangi `pip install`.
 
 ---
 
 ### 🪟 Windows (PowerShell)
 
-#### 1. Clone & masuk folder
-
 ```powershell
+# 1. Clone
 git clone https://github.com/bimaramadhan/sigap.git
 cd sigap
-```
 
-#### 2. Setup Python environment
-
-```powershell
+# 2. Python environment
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-```
 
-#### 3. Buat file `.env`
-
-```powershell
+# 3. Konfigurasi
 Copy-Item .env.example .env
-notepad .env
-```
+notepad .env   # isi GEMINI_API_KEY
 
-#### 4. Jalankan backend
+# 4. Jalankan PostgreSQL
+docker compose up -d
 
-```powershell
+# 5. Backend
 uvicorn api.main:app --reload --port 8080
-```
 
-#### 5. Jalankan frontend (terminal baru)
-
-```powershell
+# 6. Frontend (terminal baru)
 cd frontend
 npm install
 npm run dev
@@ -448,17 +260,62 @@ npm run dev
 
 ### Setup Gemini API Key (wajib untuk narasi AI)
 
-1. Buka [aistudio.google.com](https://aistudio.google.com)
-2. Login dengan Google account
-3. Klik **"Get API Key"** → **"Create API key"**
-4. Copy key, paste ke `.env`:
+1. Buka [aistudio.google.com](https://aistudio.google.com) → Login
+2. Klik **"Get API Key"** → **"Create API key"**
+3. Copy key, paste ke `.env`:
    ```
    GEMINI_API_KEY=AQ...
    GEMINI_MODEL=gemini-3.5-flash
    ```
-5. Restart backend — narasi akan berubah dari *"Template Engine"* ke *"Gemini AI Studio (Free)"*
+4. Restart backend — narasi berubah dari *"Template Engine"* ke *"Gemini AI Studio (Free)"*
 
-Free tier: **15 request/menit, 1 juta token/hari** — lebih dari cukup untuk demo.
+**Free tier:** 15 req/menit, 1 juta token/hari — lebih dari cukup untuk demo.
+
+---
+
+### Environment Variables (`.env`)
+
+| Variable | Wajib | Default | Keterangan |
+|---|---|---|---|
+| `GEMINI_API_KEY` | ✅ untuk AI | — | Dari [aistudio.google.com](https://aistudio.google.com) |
+| `GEMINI_MODEL` | ✅ untuk AI | `gemini-3.5-flash` | Model Gemini yang digunakan |
+| `DATABASE_URL` | ✅ untuk DB | `postgresql://sigap:sigap@localhost:5432/sigap` | Postgres connection string |
+| `DEMO_MODE` | — | `false` | `true` = skip Gemini + EE, pakai template |
+| `REFRESH_TOKEN` | — | — | Token untuk Cloud Scheduler endpoint |
+| `GCP_PROJECT_ID` | — | — | Hanya jika pakai Vertex AI (berbayar) |
+| `CACHE_DIR` | — | `data/cache` | Direktori cache file |
+
+---
+
+### Tanpa Docker (Development Mode)
+
+Bisa jalan tanpa Postgres — sistem akan fallback ke file JSON untuk cache:
+
+```bash
+# Jalankan tanpa docker compose up
+DEMO_MODE=false uvicorn api.main:app --reload --port 8080
+```
+
+> Laporan lapangan akan tersimpan di `data/flood_reports.json` dan diimport ke Postgres
+> otomatis saat database tersedia pertama kali.
+
+---
+
+### Test Pipeline
+
+```bash
+# Test BMKG real-time (tidak butuh setup apapun)
+python test_bmkg_live.py
+
+# Test InaRisk BNPB
+python test_inarisk_integration.py
+
+# Test weather boost
+python test_weather_integration.py
+
+# Full POC satu kota
+python run_poc.py semarang
+```
 
 ---
 
@@ -468,146 +325,180 @@ Backend berjalan di `http://localhost:8080`. Dokumentasi interaktif di `/docs`.
 
 ### System
 
-| Method | Endpoint | Fungsi |
+| Method | Endpoint | Keterangan |
 |---|---|---|
-| `GET` | `/` | Health check + version |
-| `GET` | `/cities` | List 4 kota yang didukung penuh |
-| `GET` | `/cities/search?q={query}` | **Cari dari 514 kota Indonesia** |
+| `GET` | `/` | Health check, versi, demo_mode |
+| `GET` | `/cities?q={query}` | Semua kab/kota dari katalog Kemendagri |
+| `GET` | `/cities/search?q={query}` | Cari kab/kota (min 2 karakter), limit 1-50 |
+| `GET` | `/cities/{kode}` | Satu kab/kota + bbox |
+| `POST` | `/internal/refresh-baselines` | Refresh InaRisk stale (Cloud Scheduler) |
 
 ### Data (real-time)
 
-| Method | Endpoint | Sumber | Cache |
+| Method | Endpoint | Cache | Keterangan |
 |---|---|---|---|
-| `GET` | `/alerts` | BMKG Nowcast | 30 menit |
-| `GET` | `/weather/{city}` | BMKG Prakiraan Cuaca | 60 menit |
-| `GET` | `/features/{city}` | InaRisk BNPB (6 layers) | 24 jam |
-| `GET` | `/flood-polygons/{city}` | InaRisk batas_administrasi | 7 hari |
-| `GET` | `/flood-rivers/{city}` | Static data | — |
+| `GET` | `/alerts?city={kode}` | 30 menit | BMKG alert aktif, filter per provinsi kota |
+| `GET` | `/weather/{city}` | 6 jam | BMKG prakiraan 12 jam + boost score |
+| `GET` | `/features/{city}` | 7 hari (DB) | Raw InaRisk features (fallback EE) |
 
 ### Analysis (AI)
 
 | Method | Endpoint | Keterangan |
 |---|---|---|
-| `GET` | `/vulnerability/{city}` | Skor 0-100 + breakdown + boosts |
-| `GET` | `/narasi/{city}` | Narasi bahasa Indonesia |
-| `GET` | `/analyze/{city}` | Full pipeline dalam satu request |
+| `GET` | `/vulnerability/{city}` | Score 0-100 + breakdown 7 komponen |
+| `GET` | `/narasi/{city}` | Narasi Gemini AI bahasa Indonesia |
+| `GET` | `/analyze/{city}` | **Full pipeline** — endpoint utama frontend |
 
 ### Field Reports (laporan lapangan BPBD)
 
 | Method | Endpoint | Keterangan |
 |---|---|---|
-| `POST` | `/flood-report` | Submit laporan TMA + area genangan |
-| `GET` | `/flood-reports/{city}` | Laporan terbaru (12 jam terakhir) |
-| `DELETE` | `/flood-reports/{city}` | Hapus laporan (reset demo) |
+| `POST` | `/flood-report` | Submit laporan per desa, boost score langsung |
+| `GET` | `/flood-reports/{city}` | Laporan 12 jam terakhir + boost aktif |
+| `GET` | `/flood-villages/{city}` | Desa/kelurahan grouped per kecamatan |
+| `DELETE` | `/flood-reports/{city}` | Reset laporan (untuk demo ulang) |
+
+### Map Data
+
+| Method | Endpoint | Cache | Keterangan |
+|---|---|---|---|
+| `GET` | `/flood-polygons/{city}` | 7 hari | GeoJSON kecamatan + hazard index |
+| `GET` | `/vulnerability-map/{city}` | 10 menit | GeoJSON + vuln_score per kecamatan |
 
 ---
 
-## Kota yang Didukung
+## Struktur Project
 
-| Kota | Province | Karakteristik Risiko |
+```
+sigap/
+├── api/
+│   └── main.py               # FastAPI v0.4.0, 16 endpoints, lifespan DB init
+│
+├── engine/
+│   ├── vulnerability.py      # Core 0-100 scoring (5 statis + 2 dynamic boost)
+│   ├── scoring.py            # Orkestrasi: baseline + weather + alerts + field
+│   ├── narrator.py           # Gemini AI narasi (AI Studio → Vertex → template)
+│   ├── baseline.py           # InaRisk cache management, 7 hari TTL (Postgres)
+│   ├── flood_report.py       # CRUD laporan lapangan, 12 jam window (Postgres)
+│   ├── db.py                 # psycopg3 data access, schema init, seeding
+│   ├── places.py             # Bbox resolution (wilayah_geo → hardcoded → InaRisk)
+│   ├── wilayah.py            # Katalog 90k+ kode wilayah (Kemendagri)
+│   └── wilayah_geo.py        # Profil spasial: center, bbox, elevasi per wilayah
+│
+├── pipeline/
+│   ├── bmkg_ingest.py        # BMKG alert CAP/XML, 30 menit cache
+│   ├── bmkg_weather.py       # BMKG prakiraan 12 jam per kecamatan, 6 jam cache
+│   ├── inarisk_loader.py     # InaRisk geospatial grid sampling, 7 hari cache
+│   ├── inarisk_polygon.py    # InaRisk kecamatan polygons + hazard, 7 hari cache
+│   ├── city_registry.py      # Legacy utility: InaRisk kab/kota registry
+│   └── ee_loader.py          # Google Earth Engine (fallback terakhir)
+│
+├── frontend/
+│   ├── package.json          # React + Vite + Leaflet (Tailwind 3.4.12, Vite 5.4.8)
+│   └── src/
+│       ├── App.jsx           # Layout utama: sidebar, tabs, city state
+│       ├── components/
+│       │   ├── Header.jsx           # Search kota, refresh, theme toggle
+│       │   ├── WeatherBar.jsx       # Strip cuaca + rainfall BMKG
+│       │   ├── AlertPanel.jsx       # BMKG alerts dengan severity badge
+│       │   ├── VulnerabilityCard.jsx # Arc gauge + breakdown bars
+│       │   ├── NarasiPanel.jsx      # AI narasi + priority actions + resources
+│       │   ├── MapView.jsx          # Leaflet + InaRisk polygon + KecamatanPanel
+│       │   └── FloodInputPanel.jsx  # Form laporan lapangan per desa
+│       ├── hooks/
+│       │   ├── useAnalysis.js       # Fetch /analyze/{city}, auto-refresh 5 menit
+│       │   └── useFloodReports.js
+│       └── lib/
+│           ├── api.js               # Semua HTTP calls ke backend
+│           ├── mockData.js          # Fallback mock data
+│           └── ThemeContext.jsx     # Dark/light mode
+│
+├── db/
+│   └── schema.sql            # 5 tabel Postgres: wilayah, profil, reports, baselines, weather
+│
+├── knowledge/
+│   ├── geografi/
+│   │   ├── wilayah.sql             # 90k+ kode wilayah Kemendagri
+│   │   └── wilayah_level_1_2.sql   # Profil spasial prov + kab/kota
+│   └── sop/
+│       ├── status_keadaan_darurat_bnpb.md   # Pedoman BNPB 2016
+│       ├── sistem_peringatan_dini_bnpb_2024.md  # Perka BNPB No.2/2024
+│       └── rambu_papan_informasi_bnpb_2025.md   # Perka BNPB No.3/2025
+│
+├── data/
+│   ├── cache/                # File cache: weather_*.json, bmkg_*.json, *.geojson
+│   └── flood_reports.json    # Legacy — diimport ke Postgres saat startup pertama
+│
+├── docker-compose.yml        # PostgreSQL 16, kredensial sigap/sigap, port 5432
+├── requirements.txt
+├── .env.example
+└── run_poc.py
+```
+
+---
+
+## Status Komponen
+
+### Backend
+
+| Komponen | File | Status |
 |---|---|---|
-| **Semarang** | Jawa Tengah | Rob (elevasi -2m), SLR tinggi, banjir bandang dari hulu |
-| **Bekasi** | Jawa Barat | Bantaran Kali Bekasi, kepadatan tertinggi |
-| **Jakarta** | DKI Jakarta | Pesisir (-3.5m), 48% area berpotensi banjir, SLR kritis |
-| **Surabaya** | Jawa Timur | Pesisir utara (Kenjeran, Semampir), Kali Mas |
+| API server | `api/main.py` | ✅ v0.4.0, 16 endpoints |
+| Vulnerability scorer | `engine/vulnerability.py` | ✅ 5 statis + 2 dynamic |
+| Score orchestration | `engine/scoring.py` | ✅ baseline + weather + alerts + field |
+| Gemini narrator | `engine/narrator.py` | ✅ AI Studio (free) → Vertex → template |
+| InaRisk cache (DB) | `engine/baseline.py` | ✅ Postgres, 7 hari TTL |
+| Flood reports (DB) | `engine/flood_report.py` | ✅ Postgres, 12 jam window |
+| Database layer | `engine/db.py` | ✅ psycopg3, auto-init + seeding |
+| Wilayah catalog | `engine/wilayah.py` | ✅ 90k+ kode Kemendagri |
+| Wilayah spatial | `engine/wilayah_geo.py` | ✅ bbox, center, elevasi |
+| Bbox resolution | `engine/places.py` | ✅ 3-tier fallback |
+| BMKG alerts | `pipeline/bmkg_ingest.py` | ✅ Real-time CAP/XML |
+| BMKG weather | `pipeline/bmkg_weather.py` | ✅ Real-time prakiraan 12 jam |
+| InaRisk features | `pipeline/inarisk_loader.py` | ✅ Live grid sampling |
+| InaRisk polygons | `pipeline/inarisk_polygon.py` | ✅ Kecamatan boundaries |
 
-### Mencari Kota Lain
+### Frontend
 
-`city_registry.py` sudah tersedia dengan **514 kabupaten/kota** seluruh Indonesia.
-
-```powershell
-# Build registry (sekali, <1 detik)
-python pipeline/city_registry.py --build
-
-# Search
-python pipeline/city_registry.py --search "bandung"
-# → Bandung, Kota Bandung, Bandung Barat
-
-python pipeline/city_registry.py --search "jawa timur"
-# → Bangkalan, Banyuwangi, Blitar, ... (38 kota)
-```
-
-Atau via API:
-```
-GET /cities/search?q=makassar
-GET /cities/search?q=jawa+tengah&limit=20
-```
-
-> **Saat ini** pipeline analitik (InaRisk query, vulnerability scorer) masih perlu
-> CITY_BOUNDS hardcoded. Migrasi ke dynamic lookup ada di [ROADMAP.md](ROADMAP.md).
-
----
-
-## Knowledge Base
-
-Folder `knowledge/` berisi dokumen yang digunakan Gemini sebagai referensi
-untuk menghasilkan rekomendasi yang sesuai SOP — bukan hasil karang.
-
-### Regulasi yang sudah dimasukkan
-
-| Dokumen | File | Konten Kritis |
+| Komponen | File | Status |
 |---|---|---|
-| Pedoman BNPB 2016 | `sop/status_keadaan_darurat_bnpb.md` | 3 status darurat (Siaga/Tanggap/Transisi), prosedur penetapan |
-| Peraturan BNPB No.2/2024 | `sop/sistem_peringatan_dini_bnpb_2024.md` | **4 level resmi: NORMAL/WASPADA/SIAGA/AWAS** + warna standar |
-| Peraturan BNPB No.3/2025 | `sop/rambu_papan_informasi_bnpb_2025.md` | Kode warna rambu (kuning/hijau/oranye/merah) — dasar warna peta |
+| Layout + routing | `App.jsx` | ✅ |
+| City search | `Header.jsx` | ✅ Search 514+ kab/kota |
+| Weather strip | `WeatherBar.jsx` | ✅ |
+| BMKG alerts | `AlertPanel.jsx` | ✅ Per-provinsi filter |
+| Score gauge | `VulnerabilityCard.jsx` | ✅ Arc gauge + 7 komponen |
+| AI briefing | `NarasiPanel.jsx` | ✅ |
+| Peta interaktif | `MapView.jsx` | ✅ Klik polygon → KecamatanPanel |
+| Laporan lapangan | `FloodInputPanel.jsx` | ✅ Per-desa/kelurahan |
 
-> Level NORMAL/WASPADA/SIAGA/AWAS yang dipakai SIGAP mengikuti
-> **Peraturan BNPB No.2 Tahun 2024** — regulasi terbaru dan mengikat.
+### Infrastructure
 
-### Konten yang perlu dilengkapi (Bima)
-
-- `knowledge/sop/level_siaga_banjir.md` — angka TMA spesifik per sungai
-- `knowledge/sop/prioritas_evakuasi.md` — SOP evakuasi BPBD
-- `knowledge/sop/kebutuhan_resource.md` — kalkulasi perahu/SAR/shelter
-- `knowledge/kota/semarang.md` — karakteristik banjir lokal Semarang
-- `knowledge/historis/banjir_semarang_2024.md` — kronologi kejadian nyata
-
----
-
-## Roadmap
-
-Lihat [ROADMAP.md](ROADMAP.md) untuk detail lengkap.
-
-### Jangka Pendek (sebelum Oktober)
-
-- [ ] Lengkapi knowledge base (Bima)
-- [ ] Integrasikan knowledge base ke Gemini prompt
-- [ ] InaRisk data untuk Bekasi, Jakarta, Surabaya (polygon on-demand)
-- [ ] Connect frontend ke backend live
-
-### Jangka Menengah (pasca-hackathon)
-
-- [ ] Migrasi ke dynamic city lookup via `city_registry.py` (registry sudah ada — 514 kota)
-- [ ] Search/autocomplete kota di frontend (backend `/cities/search` sudah ada)
-- [ ] Banjir Log database (PostgreSQL/Supabase)
-- [ ] Re-train threshold dari data historis BNPB
-- [ ] Deploy ke Cloud Run
-
-### Direncanakan
-
-- [ ] Level sungai real-time (AWLR BMKG — belum ada public API stabil)
-- [ ] Notifikasi push ke WhatsApp koordinator
-- [ ] Mobile view yang dioptimasi
+| Komponen | Status |
+|---|---|
+| PostgreSQL (Docker) | ✅ `docker compose up -d` |
+| Fallback tanpa Docker | ✅ JSON file cache |
+| Google AI Studio (gratis) | ✅ `GEMINI_API_KEY` di `.env` |
+| Vertex AI | ⚠️ Opsional, butuh GCP billing |
+| Google Earth Engine | ⚠️ Fallback terakhir, butuh GEE auth |
+| Cloud Scheduler | ⚠️ Production only (`/internal/refresh-baselines`) |
 
 ---
 
 ## Tim
 
-| Role | Tanggung Jawab Utama |
+| Role | Tanggung Jawab |
 |---|---|
-| **Data Scientist** | Pipeline (BMKG, InaRisk), vulnerability scorer, Gemini prompt engineering |
-| **Backend** | FastAPI endpoints, integrasi semua komponen, deploy |
-| **Frontend** | React dashboard, peta Leaflet, UI/UX |
+| Data Scientist | Pipeline BMKG/InaRisk, vulnerability scorer, Gemini prompt engineering |
+| Backend | FastAPI endpoints, DB schema, wilayah catalog, Docker |
+| Frontend | React dashboard, peta Leaflet, UI/UX |
 
 ---
 
-*Terakhir diupdate: September 2026*
+*Terakhir diupdate: Oktober 2026 — v0.4.0*
 
-**Data real yang sudah terbukti berjalan:**
-- BMKG: 17 alert aktif (24 Sep), real-time tanpa setup
-- InaRisk Semarang: flood_ratio=46.4%, inarisk_score=0.628 (dari layer_risiko_banjir BNPB)
-- InaRisk SLR: Semarang Utara = 1.0 (max) — konfirmasi subsidence
-- Prakiraan cuaca: 5 kecamatan Semarang, 0mm/12jam (29 Sep, cerah)
-- Polygon kecamatan: 22 kecamatan Semarang — Semarang Barat hazard 0.975
-- City registry: 514 kab/kota, 34 provinsi, build <1 detik
-- Peta: OpenStreetMap (bebas API key, dark mode via CSS filter)
+**Data yang terbukti berjalan:**
+- BMKG: 17 alert aktif, real-time tanpa setup
+- InaRisk Semarang: flood_ratio=46.4%, inarisk_score=0.628
+- InaRisk Jakarta: 82 kecamatan polygon, flood_ratio=49.7%
+- Gemini AI Studio: narasi bahasa Indonesia dengan `gemini-3.5-flash`
+- Postgres: 90k+ kode wilayah Kemendagri, flood reports, baseline cache

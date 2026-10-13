@@ -37,6 +37,12 @@ load_dotenv()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # SKIP_DB=true → langsung pakai file cache tanpa coba koneksi Postgres.
+    # Berguna saat tidak pakai Docker/Postgres (startup instan, tanpa jeda 3 detik).
+    if os.getenv("SKIP_DB", "false").lower() == "true":
+        logger.info("SKIP_DB=true → mode file cache (tanpa PostgreSQL)")
+        yield
+        return
     try:
         from engine.db import init_db
         init_db()
@@ -45,7 +51,8 @@ async def lifespan(_app: FastAPI):
         logger.warning(
             f"Database tidak tersedia ({type(e).__name__}: {e}). "
             "Backend tetap jalan dengan file-based cache. "
-            "Jalankan 'docker compose up -d' untuk full persistence."
+            "Set SKIP_DB=true di .env untuk mematikan pesan ini, "
+            "atau jalankan 'docker compose up -d' untuk full persistence."
         )
     yield
 

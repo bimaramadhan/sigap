@@ -74,7 +74,8 @@ const RIVER_LEVELS = [
 ]
 
 function ReportCard({ report, isDark }) {
-  const level = RIVER_LEVELS.find(l => l.id === report.river_level) || RIVER_LEVELS[0]
+  const levelId = report.flood_level || report.river_level || 'normal'
+  const level = RIVER_LEVELS.find(l => l.id === levelId) || RIVER_LEVELS[0]
   const timeStr = new Date(report.reported_at).toLocaleTimeString('id-ID',
     { hour: '2-digit', minute: '2-digit' })
   const variant = isDark ? 'dark' : 'light'
@@ -90,9 +91,20 @@ function ReportCard({ report, isDark }) {
         </span>
         <span className={isDark ? 'text-gray-500' : 'text-gray-400'}>{timeStr}</span>
       </div>
-      <div className={isDark ? 'text-gray-300' : 'text-gray-700'}>
-        {report.river_name} — <strong>{report.water_level_cm} cm</strong>
+      <div className={clsx('font-medium', isDark ? 'text-gray-200' : 'text-gray-800')}>
+        {report.desa_name ? `Desa/Kel. ${report.desa_name}` : (report.river_name || 'Desa/Wilayah')}
+        {report.water_level_cm ? ` — ${report.water_level_cm} cm` : ''}
       </div>
+      {report.kecamatan && (
+        <div className={isDark ? 'text-gray-400' : 'text-gray-500'}>
+          Kecamatan {report.kecamatan}
+        </div>
+      )}
+      {report.notes && (
+        <div className={clsx('text-[11px] italic', isDark ? 'text-gray-400' : 'text-gray-500')}>
+          &ldquo;{report.notes}&rdquo;
+        </div>
+      )}
       {report.flooded_areas?.length > 0 && (
         <div className={isDark ? 'text-gray-400' : 'text-gray-500'}>
           {report.flooded_areas.length} area tergenang

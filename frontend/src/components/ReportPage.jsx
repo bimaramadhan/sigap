@@ -20,6 +20,7 @@ import {
   Sparkles,
   ShieldAlert,
   ClipboardList,
+  MapPin,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -30,10 +31,12 @@ import { useTheme } from '../lib/ThemeContext.jsx'
 export default function ReportPage({
   selectedCity,
   cityName,
+  cities = [],
+  onCityChange,
   narasi,
   vulnerability,
   loading,
-  rivers = [],
+  villages = [],
   reports = [],
   onSubmitReport,
   onClearReports,
@@ -44,6 +47,9 @@ export default function ReportPage({
 
   // View mode: 'both' | 'briefing' | 'laporan'
   const [viewMode, setViewMode] = useState('both')
+
+  const totalVillages = villages.reduce((acc, g) => acc + (g.villages?.length || 0), 0)
+  const totalKecamatan = villages.length
 
   // Theme tokens
   const bgCard = isDark ? 'bg-gray-900/90' : 'bg-white'
@@ -70,8 +76,49 @@ export default function ReportPage({
                   Laporan & Briefing Situasi Banjir
                 </h1>
                 <p className={clsx('text-xs md:text-sm mt-0.5', textMuted)}>
-                  Intelijen AI kebencanaan dan umpan balik pelaporan lapangan BPBD — {cityName || selectedCity}
+                  Intelijen AI kebencanaan dan umpan balik pelaporan lapangan tingkat desa/kelurahan BPBD
                 </p>
+              </div>
+
+              {/* Kota / Kabupaten active mapping indicator */}
+              <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                <div className={clsx(
+                  'flex items-center gap-1.5 px-3 py-1 rounded-xl border text-xs',
+                  isDark ? 'bg-gray-800/80 border-gray-700 text-gray-200' : 'bg-gray-100 border-gray-300 text-gray-800'
+                )}>
+                  <MapPin size={13} className="text-blue-500 shrink-0" />
+                  <span className={textMuted}>Kota/Kab:</span>
+                  {cities && cities.length > 0 && onCityChange ? (
+                    <select
+                      value={selectedCity}
+                      onChange={(e) => onCityChange(e.target.value)}
+                      className={clsx(
+                        'bg-transparent font-bold cursor-pointer focus:outline-none',
+                        isDark ? 'text-white' : 'text-gray-900'
+                      )}
+                    >
+                      {cities.map((c) => (
+                        <option
+                          key={c.id}
+                          value={c.id}
+                          className={isDark ? 'bg-gray-900 text-white' : 'bg-white text-gray-900'}
+                        >
+                          {c.label || c.name || c.id}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="font-bold">{cityName || selectedCity}</span>
+                  )}
+                </div>
+
+                <div className={clsx(
+                  'flex items-center gap-1.5 px-3 py-1 rounded-xl border text-xs',
+                  isDark ? 'bg-blue-500/10 border-blue-500/30 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-700'
+                )}>
+                  <span className="font-semibold">{totalVillages} Desa/Kelurahan</span>
+                  <span className="opacity-75 font-normal">({totalKecamatan} Kecamatan)</span>
+                </div>
               </div>
             </div>
 
@@ -104,7 +151,7 @@ export default function ReportPage({
                   ? isDark ? 'bg-blue-500/15 border-blue-500/40 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-700'
                   : isDark ? 'bg-gray-800 border-gray-700 text-gray-400' : 'bg-gray-100 border-gray-300 text-gray-600'
               )}>
-                <Droplets size={13} />
+                <ClipboardList size={13} />
                 <span>{reports.length} Laporan Lapangan</span>
               </div>
             </div>
@@ -237,7 +284,7 @@ export default function ReportPage({
                       Laporan Lapangan Koordinator BPBD
                     </h2>
                     <p className={clsx('text-xs', textMuted)}>
-                      Input kondisi TMA sungai dan genangan riil lapangan (BNPB No.2/2024)
+                      Input kondisi genangan dan banjir per desa/kelurahan di {cityName || selectedCity} (BNPB No.2/2024)
                     </p>
                   </div>
                 </div>
@@ -246,8 +293,10 @@ export default function ReportPage({
               {/* Konten FloodInputPanel */}
               <FloodInputPanel
                 city={selectedCity}
-                rivers={rivers}
+                cityName={cityName}
+                villages={villages}
                 reports={reports}
+                loading={loading?.villages || loading?.reports}
                 isDark={isDark}
                 onSubmit={onSubmitReport}
                 onClear={onClearReports}

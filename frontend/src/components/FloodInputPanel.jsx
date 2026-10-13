@@ -135,12 +135,17 @@ function ReportCard({ report, isDark }) {
         </span>
         <span className={isDark ? 'text-gray-500' : 'text-gray-400'}>{timeStr}</span>
       </div>
-      <div className={isDark ? 'text-gray-300' : 'text-gray-700'}>
-        {report.desa_name || report.river_name}
+      <div className={clsx('font-medium', isDark ? 'text-gray-200' : 'text-gray-800')}>
+        {report.desa_name ? `Desa/Kel. ${report.desa_name}` : (report.river_name || 'Desa/Kelurahan')}
       </div>
       {report.kecamatan && (
         <div className={isDark ? 'text-gray-400' : 'text-gray-500'}>
-          Kec. {report.kecamatan}
+          Kecamatan {report.kecamatan}
+        </div>
+      )}
+      {report.notes && (
+        <div className={clsx('text-[11px] italic', isDark ? 'text-gray-400' : 'text-gray-500')}>
+          &ldquo;{report.notes}&rdquo;
         </div>
       )}
       <div className={clsx('font-medium', level.text[variant])}>
@@ -152,6 +157,7 @@ function ReportCard({ report, isDark }) {
 
 export default function FloodInputPanel({
   city,
+  cityName,
   villages = [],
   reports  = [],
   loading  = false,
@@ -200,7 +206,8 @@ export default function FloodInputPanel({
       },
     ]
   }, [villages, filter, desaKode])
-  const hasVillages     = villages.some(g => g.villages?.length > 0)
+  const totalVillages   = useMemo(() => villages.reduce((acc, g) => acc + (g.villages?.length || 0), 0), [villages])
+  const hasVillages     = totalVillages > 0
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -258,7 +265,9 @@ export default function FloodInputPanel({
         </div>
 
         <div>
-          <label className={labelCls}>Cari desa / kelurahan</label>
+          <label className={labelCls}>
+            Cari desa / kelurahan {hasVillages ? <span className="opacity-75 font-normal">({totalVillages} desa di {villages.length} kecamatan)</span> : ''}
+          </label>
           <input
             type="text"
             placeholder="Ketik nama desa atau kecamatan"
@@ -270,7 +279,9 @@ export default function FloodInputPanel({
         </div>
 
         <div>
-          <label className={labelCls}>Desa / Kelurahan *</label>
+          <label className={labelCls}>
+            Desa / Kelurahan * {cityName ? <span className="text-blue-500 font-semibold">({cityName})</span> : ''}
+          </label>
           <select
             value={desaKode}
             onChange={e => setDesaKode(e.target.value)}
@@ -279,7 +290,7 @@ export default function FloodInputPanel({
             className={clsx(inputCls, 'cursor-pointer')}
           >
             <option value="">
-              {hasVillages ? 'Pilih desa...' : 'Belum ada data desa untuk kota ini'}
+              {hasVillages ? `Pilih desa / kelurahan (${totalVillages} desa)...` : loading ? 'Memuat data desa...' : 'Belum ada data desa untuk wilayah ini'}
             </option>
             {visibleGroups.map(group => (
               <optgroup key={group.kecamatan_kode} label={groupLabel(group, showKota)}>
@@ -343,7 +354,7 @@ export default function FloodInputPanel({
               : 'bg-blue-50 border-blue-200 text-blue-700'
           )}>
             <Droplets size={12} className="inline mr-1" />
-            Laporan ini menambah <strong>+{selectedLevel.boost} poin</strong> ke skor {city}
+            Laporan ini menambah <strong>+{selectedLevel.boost} poin</strong> ke skor {cityName || city}
             {selectedVillage ? ` dan kecamatan ${selectedVillage.kecamatan}` : ''}
           </div>
         )}

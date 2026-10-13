@@ -1,4 +1,4 @@
-﻿/**
+/**
  * lib/mockData.js
  * ────────────────
  * Data mock untuk development tanpa backend.
@@ -368,6 +368,22 @@ export const MOCK_VILLAGES = {
       villages: [{ kode: '31.72.01.1001', nama: 'Penjaringan' }],
     },
   ],
+  surabaya: [
+    {
+      kecamatan: 'Genteng', kecamatan_kode: '35.78.01', kota_administrasi: 'Kota Surabaya',
+      villages: [
+        { kode: '35.78.01.1001', nama: 'Embong Kaliasin' },
+        { kode: '35.78.01.1002', nama: 'Ketabang' },
+      ],
+    },
+    {
+      kecamatan: 'Tegalsari', kecamatan_kode: '35.78.02', kota_administrasi: 'Kota Surabaya',
+      villages: [
+        { kode: '35.78.02.1001', nama: 'Tegalsari' },
+        { kode: '35.78.02.1002', nama: 'Wonorejo' },
+      ],
+    },
+  ],
 }
 
 // Laporan lapangan default kosong — user yang mengisi saat demo
@@ -375,6 +391,7 @@ export const MOCK_FLOOD_REPORTS = {
   semarang: { city: 'semarang', report_count: 0, latest_boost: 0, boost_reason: '', reports: [] },
   bekasi:   { city: 'bekasi',   report_count: 0, latest_boost: 0, boost_reason: '', reports: [] },
   jakarta:  { city: 'jakarta',  report_count: 0, latest_boost: 0, boost_reason: '', reports: [] },
+  surabaya: { city: 'surabaya', report_count: 0, latest_boost: 0, boost_reason: '', reports: [] },
 }
 
 // In-memory mock store untuk simulasi submit tanpa backend
@@ -382,15 +399,40 @@ let _mockReportStore = {
   semarang: [],
   bekasi:   [],
   jakarta:  [],
+  surabaya: [],
+}
+
+const CITY_KEY_ALIAS = {
+  '33.74': 'semarang',
+  '32.75': 'bekasi',
+  '35.78': 'surabaya',
+  '31.71': 'jakarta',
+  '31.72': 'jakarta',
+  '31.73': 'jakarta',
+  '31.74': 'jakarta',
+  '31.75': 'jakarta',
+}
+
+function resolveCityKey(city) {
+  if (!city) return 'semarang'
+  const c = String(city).toLowerCase()
+  return CITY_KEY_ALIAS[c] || c
 }
 
 export function getMockReports(city) {
-  return _mockReportStore[city] ?? []
+  const c = resolveCityKey(city)
+  return _mockReportStore[c] ?? _mockReportStore[city] ?? []
 }
 
 function findMockVillage(city, kode) {
-  for (const group of MOCK_VILLAGES[city] ?? []) {
-    const village = group.villages.find(v => v.kode === kode)
+  const c = resolveCityKey(city)
+  const candidateGroups = [
+    ...(MOCK_VILLAGES[c] ?? []),
+    ...(MOCK_VILLAGES[city] ?? []),
+    ...Object.values(MOCK_VILLAGES).flat(),
+  ]
+  for (const group of candidateGroups) {
+    const village = group.villages?.find(v => v.kode === kode)
     if (village) {
       return {
         ...village,
@@ -403,7 +445,8 @@ function findMockVillage(city, kode) {
 }
 
 export function addMockReport(data) {
-  const city   = data.city?.toLowerCase() ?? 'semarang'
+  const rawCity = String(data.city ?? 'semarang')
+  const city = resolveCityKey(rawCity)
   const levels = { normal: 0, waspada: 8, siaga: 15, awas: 25 }
   const level  = data.flood_level ?? 'normal'
   const boost  = levels[level] ?? 0
@@ -419,7 +462,7 @@ export function addMockReport(data) {
 
   const report = {
     id:                `${city}_${Date.now()}`,
-    city,
+    city:              rawCity,
     reported_at:       new Date().toISOString(),
     reporter:          data.reporter || 'Koordinator BPBD',
     desa_kode:         village.kode,
@@ -441,11 +484,20 @@ export function addMockReport(data) {
   if (!_mockReportStore[city]) _mockReportStore[city] = []
   _mockReportStore[city].unshift(report)
   _mockReportStore[city] = _mockReportStore[city].slice(0, 20)
+  if (rawCity !== city) {
+    if (!_mockReportStore[rawCity]) _mockReportStore[rawCity] = []
+    _mockReportStore[rawCity].unshift(report)
+    _mockReportStore[rawCity] = _mockReportStore[rawCity].slice(0, 20)
+  }
   return report
 }
 
 export function clearMockReports(city) {
-  _mockReportStore[city] = []
+  const c = resolveCityKey(city)
+  _mockReportStore[c] = []
+  if (city && city !== c) {
+    _mockReportStore[city] = []
+  }
 }
 
 // ── Surabaya additions ────────────────────────────────────────────────────────

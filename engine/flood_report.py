@@ -108,17 +108,18 @@ def _calculate_boost(flood_level: str, desa_name: str, kecamatan: str) -> dict:
 
 
 def _public_report(report: dict) -> dict:
-    level = _normalize_level(report.get("flood_level") or "normal")
+    level = _normalize_level(report.get("flood_level") or report.get("river_level") or "normal")
     reported_at = report.get("reported_at") or ""
     if hasattr(reported_at, "isoformat"):
         reported_at = reported_at.isoformat()
+    desa_name = report.get("desa_name") or report.get("river_name") or ""
     return {
         "id":                 report.get("id", ""),
         "city":               report.get("kab_kode") or report.get("city") or "",
         "reported_at":        reported_at,
         "reporter":           report.get("reporter") or "Koordinator BPBD",
         "desa_kode":          report.get("desa_kode") or "",
-        "desa_name":          report.get("desa_name") or "",
+        "desa_name":          desa_name,
         "kecamatan":          report.get("kecamatan") or "",
         "kecamatan_kode":     report.get("kecamatan_kode") or "",
         "flood_level":        level,

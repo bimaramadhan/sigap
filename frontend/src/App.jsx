@@ -194,7 +194,7 @@ export default function App() {
   }, [refresh])
 
   const { villages, reports, kecamatanBoosts, submit: submitReport, clear: clearReports }
-    = useFloodReports(activeCity, onReportSuccess)
+    = useFloodReports(selectedCity, onReportSuccess)
 
   // ── Toast helper ───────────────────────────────────────────────────────────
   const showToast = (message, type = 'success') => {
@@ -239,10 +239,12 @@ export default function App() {
         <ReportPage
           selectedCity={selectedCity}
           cityName={cityName}
+          cities={cities}
+          onCityChange={handleCityChange}
           narasi={narasi}
           vulnerability={vulnerability}
           loading={loading}
-          rivers={rivers}
+          villages={villages}
           reports={reports}
           onSubmitReport={handleSubmitReport}
           onClearReports={() => {

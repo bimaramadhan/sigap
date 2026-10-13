@@ -668,7 +668,6 @@ def get_flood_polygons(city: str, force: bool = Query(False)):
         )
 
 
-<<<<<<< HEAD
 # ── Vulnerability Map (per-kecamatan) ─────────────────────────────────────────
 
 @app.get("/vulnerability-map/{city}", tags=["Map Data"])

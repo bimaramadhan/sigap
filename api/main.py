@@ -680,3 +680,127 @@ def get_flood_polygons(city: str, force: bool = Query(False)):
             status_code=503,
             detail=f"InaRisk polygon service tidak tersedia: {str(e)}"
         )
+
+
+# ── Vulnerability Map (per-kecamatan) ─────────────────────────────────────────
+
+@app.get("/vulnerability-map/{city}", tags=["Map Data"])
+def get_vulnerability_map(city: str):
+    """
+    GeoJSON polygon kecamatan dengan vulnerability score per kecamatan.
+    Response di-cache 10 menit agar cepat dan tidak timeout di frontend.
+    """
+    city = _validate_city(city)
+
+    # ── Cache check (10 menit) ────────────────────────────────────────────────
+    import hashlib, time
+    from pathlib import Path
+    _cache_dir = Path("data/cache")
+    _cache_file = _cache_dir / f"vuln_map_{city}.json"
+    _CACHE_TTL = 600  # 10 menit
+
+    if _cache_file.exists():
+        age = time.time() - _cache_file.stat().st_mtime
+        if age < _CACHE_TTL:
+            import json as _json
+            with open(_cache_file, encoding="utf-8") as f:
+                cached = _json.load(f)
+            logger.debug(f"  vuln_map cache hit: {city} (age {age:.0f}s)")
+            return cached
+
+    try:
+        from pipeline.inarisk_polygon import get_flood_polygons as _get_polygons
+        from engine.vulnerability     import (
+            calculate_from_cache_or_ee, WEIGHTS, NORM, SCORE_CATEGORIES
+        )
+
+        # ── 1. Ambil city-level vulnerability (dengan semua boosts) ───────────
+        city_result = calculate_from_cache_or_ee(
+            city,
+            include_weather=True,
+            include_alerts=True,
+        )
+
+        city_base         = city_result.score - city_result.weather_boost - city_result.alert_boost
+        city_hazard_contrib = round(city_result.hazard_score * WEIGHTS["hazard"] * 100, 2)
+        non_hazard_base   = max(0, city_base - city_hazard_contrib)
+        weather_boost     = city_result.weather_boost
+        alert_boost       = city_result.alert_boost
+
+        # ── 2. Ambil polygon kecamatan (cache 7 hari) ──────────────────────────
+        polygons = _get_polygons(city)
+
+        # ── 3. Hitung score per kecamatan ──────────────────────────────────────
+        def _kec_score(hazard_val: float) -> float:
+            # Hazard component untuk kecamatan ini — max 30 poin (weight 30%)
+            kec_hazard = min(30.0, (hazard_val / NORM["flood_ratio_max"]) * WEIGHTS["hazard"] * 100)
+            raw = non_hazard_base + kec_hazard + weather_boost + alert_boost
+            return round(min(100.0, max(0.0, raw)), 1)
+
+        def _kec_category(score: float) -> tuple[str, str]:
+            for (lo, hi), (cat, _) in SCORE_CATEGORIES.items():
+                if lo <= score < hi:
+                    return cat, cat
+            return "🔴 AWAS", "🔴 AWAS"
+
+        VULN_COLORS = {
+            "🟢 NORMAL":  "#22c55e",
+            "🟡 WASPADA": "#eab308",
+            "🟠 SIAGA":   "#f97316",
+            "🔴 AWAS":    "#dc2626",
+        }
+
+        city_pop      = city_result.total_population
+        n_features    = len(polygons.get("features", []))
+        pop_per_kec   = round(city_pop / n_features) if n_features > 0 else 0
+
+        enriched_features = []
+        for feat in polygons.get("features", []):
+            props      = dict(feat.get("properties", {}))
+            hazard_val = props.get("hazard", 0.0)
+            vs         = _kec_score(hazard_val)
+            cat, _     = _kec_category(vs)
+
+            # Estimasi populasi terdampak proporsional dengan hazard
+            pop_factor = 0.5 + hazard_val * 0.5   # 50%–100% dari rata-rata populasi kecamatan
+            pop_est    = round(pop_per_kec * pop_factor)
+
+            props["vuln_score"]     = vs
+            props["vuln_category"]  = cat
+            props["vuln_color"]     = VULN_COLORS.get(cat, "#6b7280")
+            props["population_est"] = pop_est
+
+            enriched_features.append({
+                "type":       feat["type"],
+                "geometry":   feat["geometry"],
+                "properties": props,
+            })
+
+        # Sort by vuln_score descending (highest risk pertama)
+        enriched_features.sort(
+            key=lambda f: f["properties"]["vuln_score"], reverse=True
+        )
+
+        result = {
+            "type":     "FeatureCollection",
+            "city":     city,
+            "city_score": city_result.score,
+            "city_category": city_result.category,
+            "weather_boost": weather_boost,
+            "alert_boost":   alert_boost,
+            "features": enriched_features,
+            "_source":  "InaRisk BNPB + SIGAP vulnerability engine",
+            "_generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # ── Simpan ke cache ───────────────────────────────────────────────────
+        import json as _json
+        _cache_dir.mkdir(parents=True, exist_ok=True)
+        with open(_cache_file, "w", encoding="utf-8") as f:
+            _json.dump(result, f, ensure_ascii=False)
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error computing vulnerability map: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

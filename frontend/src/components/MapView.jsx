@@ -1,55 +1,31 @@
 /**
- * MapView.jsx v3
+ * MapView.jsx v4
  * ──────────────
- * Peta interaktif dengan flood zone overlay.
+ * Peta interaktif dengan vulnerability score per kecamatan.
  *
  * Dua mode overlay:
- *   1. LIVE (via InaRisk API): polygon kecamatan asli + nilai hazard nyata
- *      - Menggunakan react-leaflet GeoJSON component
- *      - Warna berdasarkan INDEKS_BAHAYA_BANJIR dari BNPB
+ *   1. LIVE: polygon kecamatan + vulnerability score per kecamatan
+ *      - Warna berdasarkan vuln_score (0-100), bukan hanya hazard
+ *      - Klik polygon → tampilkan detail kecamatan
  *   2. MOCK (fallback): kotak persegi dari MOCK_FLOOD_ZONES
- *      - Dipakai saat API tidak tersedia atau VITE_USE_MOCK=true
  */
 
 import { MapContainer, TileLayer, Polygon, Tooltip, ZoomControl, useMap, GeoJSON } from 'react-leaflet'
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import { MOCK_FLOOD_ZONES, CITY_CENTERS } from '../lib/mockData.js'
 import { useTheme } from '../lib/ThemeContext.jsx'
 import { useFloodPolygons } from '../hooks/useFloodPolygons.js'
+import { getVulnerabilityMap } from '../lib/api.js'
 
-// ── Tiles — OpenStreetMap (gratis, tidak butuh API key) ──────────────────────
 const TILES = {
-  // Dark mode: OSM dengan filter CSS
-  dark: {
-    url:         'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  },
-  // Light mode: OSM standard
-  light: {
-    url:         'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  },
+  dark:  { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' },
+  light: { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' },
 }
 
-// ── Mock zone styles (fallback) ───────────────────────────────────────────────
 const MOCK_STYLE = {
   high:   { color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.30, weight: 2 },
   medium: { color: '#f97316', fillColor: '#f97316', fillOpacity: 0.22, weight: 1.5 },
   low:    { color: '#eab308', fillColor: '#eab308', fillOpacity: 0.15, weight: 1 },
-}
-const MOCK_HOVER = {
-  high:   { fillOpacity: 0.55 },
-  medium: { fillOpacity: 0.45 },
-  low:    { fillOpacity: 0.35 },
-}
-
-// Risk level labels sesuai BNPB No.3/2025
-const RISK_LABELS = {
-  very_high: '🔴 Sangat Tinggi',
-  high:      '🟠 Tinggi',
-  medium:    '🟡 Sedang',
-  low:       '🟢 Rendah',
-  very_low:  '🟢 Sangat Rendah',
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -68,62 +44,140 @@ function ThemeTileLayer() {
   return <TileLayer url={tile.url} attribution={tile.attribution} maxZoom={19} />
 }
 
-// ── GeoJSON Tooltip (untuk polygon dari InaRisk) ──────────────────────────────
-function makeTooltipContent(feature, isDark) {
-  const p = feature.properties
-  const bg   = isDark ? '#1f2937' : '#ffffff'
-  const fg   = isDark ? '#f3f4f6' : '#111827'
-  const bdr  = isDark ? '#374151' : '#e5e7eb'
+// ── Kecamatan Detail Panel ────────────────────────────────────────────────────
+function KecamatanPanel({ kec, isDark, onClose }) {
+  if (!kec) return null
 
-  const content = document.createElement('div')
-  content.style.cssText = `background:${bg};color:${fg};border:1px solid ${bdr};border-radius:8px;padding:8px 10px;min-width:160px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.3)`
-  content.innerHTML = `
-    <p style="font-weight:700;margin:0 0 4px">${p.name}</p>
-    <p style="color:#f97316;margin:0 0 4px">${RISK_LABELS[p.risk] ?? p.risk}</p>
-    <p style="opacity:.75;font-size:12px;margin:0">Indeks Bahaya: ${p.hazard?.toFixed(3) ?? 'N/A'}</p>
-    ${p.kab ? `<p style="opacity:.55;font-size:11px;font-style:italic;margin:2px 0 0">${p.kab}</p>` : ''}
-  `
-  return content
+  const score = kec.vuln_score ?? 0
+  const cat   = kec.vuln_category ?? ''
+  const isAwas  = cat.includes('AWAS')
+  const isSiaga = cat.includes('SIAGA')
+
+  const bg   = isDark ? '#111827' : '#ffffff'
+  const bdr  = isDark ? '#1f2937' : '#f1f5f9'
+  const txt  = isDark ? '#f9fafb' : '#111827'
+  const sub  = isDark ? '#9ca3af' : '#64748b'
+
+  const scoreColor = score >= 75 ? '#dc2626'
+    : score >= 50 ? '#f97316'
+    : score >= 25 ? '#eab308'
+    : '#22c55e'
+
+  return (
+    <div style={{
+      position: 'absolute', bottom: 72, left: 12, zIndex: 500, width: 230,
+      background: bg, border: `1px solid ${isDark ? '#374151' : '#e2e8f0'}`,
+      borderRadius: 12, padding: '12px 14px', fontSize: 13,
+      boxShadow: '0 8px 24px rgba(0,0,0,0.25)', backdropFilter: 'blur(10px)',
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+        <div>
+          <p style={{ fontWeight: 700, color: txt, margin: 0 }}>{kec.name}</p>
+          <p style={{ color: sub, fontSize: 11, margin: '2px 0 0', fontStyle: 'italic' }}>{kec.kab}</p>
+        </div>
+        <button onClick={onClose} style={{
+          background: 'none', border: 'none', cursor: 'pointer',
+          color: sub, fontSize: 16, lineHeight: 1, padding: '0 2px',
+        }}>✕</button>
+      </div>
+
+      {/* Score gauge */}
+      <div style={{
+        background: isDark ? '#1f2937' : '#f8fafc',
+        borderRadius: 8, padding: '8px 10px', marginBottom: 10,
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <span style={{ color: sub, fontSize: 11 }}>Vulnerability Score</span>
+          <span style={{ fontWeight: 800, fontSize: 18, color: scoreColor }}>{score}</span>
+        </div>
+        {/* Progress bar */}
+        <div style={{ height: 5, background: isDark ? '#374151' : '#e2e8f0', borderRadius: 99 }}>
+          <div style={{ height: '100%', width: `${score}%`, background: scoreColor, borderRadius: 99, transition: 'width 0.6s ease' }} />
+        </div>
+        <p style={{ color: scoreColor, fontWeight: 600, fontSize: 12, margin: '6px 0 0', textAlign: 'right' }}>{cat}</p>
+      </div>
+
+      {/* Detail rows */}
+      {[
+        { label: 'Indeks Bahaya BNPB', value: kec.hazard?.toFixed(3) ?? '-' },
+        { label: 'Kelas Bahaya',        value: kec.risk?.replace('_', ' ') ?? '-' },
+        { label: 'Est. Populasi',       value: kec.population_est ? `${kec.population_est.toLocaleString('id-ID')} jiwa` : '-' },
+      ].map(({ label, value }) => (
+        <div key={label} style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          paddingBottom: 5, marginBottom: 5,
+          borderBottom: `1px solid ${isDark ? '#1f2937' : '#f1f5f9'}`,
+        }}>
+          <span style={{ color: sub, fontSize: 11 }}>{label}</span>
+          <span style={{ color: txt, fontSize: 12, fontWeight: 500 }}>{value}</span>
+        </div>
+      ))}
+
+      {/* Alert banner */}
+      {(isAwas || isSiaga) && (
+        <div style={{
+          background: isAwas ? 'rgba(220,38,38,0.12)' : 'rgba(249,115,22,0.12)',
+          border: `1px solid ${isAwas ? 'rgba(220,38,38,0.3)' : 'rgba(249,115,22,0.3)'}`,
+          borderRadius: 6, padding: '5px 8px', fontSize: 11,
+          color: isAwas ? '#ef4444' : '#f97316', marginTop: 4,
+        }}>
+          {isAwas ? '🚨 Butuh perhatian segera' : '⚠️ Pantau secara aktif'}
+        </div>
+      )}
+
+      <p style={{ color: sub, fontSize: 10, margin: '8px 0 0', textAlign: 'center' }}>
+        Klik kecamatan lain untuk membandingkan
+      </p>
+    </div>
+  )
 }
 
-// ── Live GeoJSON Overlay ──────────────────────────────────────────────────────
-function LiveFloodLayer({ geojson, isDark }) {
+// ── Live GeoJSON Layer (vulnerability-colored) ────────────────────────────────
+function LiveVulnLayer({ geojson, isDark, onKecamatanClick }) {
   const geoJsonRef = useRef(null)
 
   const styleFeature = useCallback((feature) => {
-    const color = feature?.properties?.color ?? '#f97316'
-    return {
-      color,
-      fillColor:   color,
-      fillOpacity: 0.30,
-      weight:      1.5,
-      opacity:     0.9,
-    }
+    // Gunakan vuln_color kalau ada, fallback ke color (hazard-based)
+    const color = feature?.properties?.vuln_color ?? feature?.properties?.color ?? '#f97316'
+    return { color, fillColor: color, fillOpacity: 0.35, weight: 1.5, opacity: 0.9 }
   }, [])
 
   const onEachFeature = useCallback((feature, layer) => {
-    const tooltipEl = makeTooltipContent(feature, isDark)
+    const p = feature.properties
+
+    // Tooltip hover — tampilkan score
+    const tooltipEl = document.createElement('div')
+    const bg  = isDark ? '#1f2937' : '#fff'
+    const fg  = isDark ? '#f3f4f6' : '#111'
+    const bdr = isDark ? '#374151' : '#e5e7eb'
+    tooltipEl.style.cssText = `background:${bg};color:${fg};border:1px solid ${bdr};border-radius:8px;padding:8px 10px;min-width:160px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.3)`
+
+    const scoreColor = (p.vuln_score ?? 0) >= 75 ? '#dc2626'
+      : (p.vuln_score ?? 0) >= 50 ? '#f97316'
+      : (p.vuln_score ?? 0) >= 25 ? '#ca8a04'
+      : '#16a34a'
+
+    tooltipEl.innerHTML = `
+      <p style="font-weight:700;margin:0 0 4px">${p.name}</p>
+      <p style="color:${scoreColor};font-weight:600;margin:0 0 2px">${p.vuln_category ?? ''} &nbsp; <b>${p.vuln_score ?? '-'}</b>/100</p>
+      <p style="opacity:.65;font-size:11px;margin:0">Bahaya BNPB: ${p.hazard?.toFixed(3) ?? 'N/A'} &bull; Klik untuk detail</p>
+    `
     layer.bindTooltip(tooltipEl, { sticky: true, className: 'inarisk-tooltip' })
 
     layer.on({
-      mouseover: (e) => {
-        e.target.setStyle({ fillOpacity: 0.55, weight: 2.5 })
-        e.target.bringToFront()
-      },
-      mouseout: (e) => {
-        if (geoJsonRef.current) {
-          geoJsonRef.current.resetStyle(e.target)
-        }
-      },
+      mouseover: (e) => { e.target.setStyle({ fillOpacity: 0.65, weight: 2.5 }); e.target.bringToFront() },
+      mouseout:  (e) => { if (geoJsonRef.current) geoJsonRef.current.resetStyle(e.target) },
+      click:     () => { onKecamatanClick(p) },
     })
-  }, [isDark])
+  }, [isDark, onKecamatanClick])
 
   if (!geojson) return null
 
   return (
     <GeoJSON
       ref={geoJsonRef}
-      key={`${geojson.city}-${geojson._timestamp}`}
+      key={`${geojson.city}-${geojson._generated_at}`}
       data={geojson}
       style={styleFeature}
       onEachFeature={onEachFeature}
@@ -142,28 +196,21 @@ function MockFloodLayer({ city, isDark }) {
           positions={zone.coords}
           pathOptions={MOCK_STYLE[zone.risk] ?? MOCK_STYLE.low}
           eventHandlers={{
-            mouseover: e => e.target.setStyle({ ...MOCK_STYLE[zone.risk], ...MOCK_HOVER[zone.risk] }),
+            mouseover: e => e.target.setStyle({ ...MOCK_STYLE[zone.risk], fillOpacity: 0.55 }),
             mouseout:  e => e.target.setStyle(MOCK_STYLE[zone.risk]),
           }}
         >
           <Tooltip sticky>
             <div style={{
-              background:   isDark ? '#1f2937' : '#ffffff',
-              color:        isDark ? '#f3f4f6' : '#111827',
-              border:       `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
-              borderRadius: '8px', padding: '8px 10px', minWidth: '160px',
-              fontSize: '13px', boxShadow: '0 4px 12px rgba(0,0,0,.3)',
+              background: isDark ? '#1f2937' : '#fff', color: isDark ? '#f3f4f6' : '#111',
+              border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+              borderRadius: 8, padding: '8px 10px', minWidth: 160, fontSize: 13,
             }}>
               <p style={{ fontWeight: 700, marginBottom: 4 }}>{zone.name}</p>
               <p style={{ color: '#f97316', marginBottom: 4 }}>
                 {zone.risk === 'high' ? '🔴 Risiko Tinggi' : zone.risk === 'medium' ? '🟠 Risiko Sedang' : '🟡 Risiko Rendah'}
               </p>
-              <p style={{ opacity: 0.75, fontSize: 12 }}>
-                Est. {zone.pop_est?.toLocaleString('id-ID')} jiwa
-              </p>
-              <p style={{ opacity: 0.55, fontSize: 11, fontStyle: 'italic', marginTop: 2 }}>
-                {zone.note}
-              </p>
+              <p style={{ opacity: 0.75, fontSize: 12 }}>Est. {zone.pop_est?.toLocaleString('id-ID')} jiwa</p>
               <p style={{ opacity: 0.4, fontSize: 10, marginTop: 4 }}>⚠️ Mock data</p>
             </div>
           </Tooltip>
@@ -175,16 +222,16 @@ function MockFloodLayer({ city, isDark }) {
 
 // ── Legend ────────────────────────────────────────────────────────────────────
 function MapLegend({ isDark, isLive }) {
-  const bg   = isDark ? 'rgba(17,24,39,0.92)' : 'rgba(255,255,255,0.92)'
-  const bdr  = isDark ? '#374151' : '#e2e8f0'
-  const txt  = isDark ? '#d1d5db' : '#374151'
-  const sub  = isDark ? '#6b7280' : '#94a3b8'
+  const bg  = isDark ? 'rgba(17,24,39,0.92)' : 'rgba(255,255,255,0.92)'
+  const bdr = isDark ? '#374151' : '#e2e8f0'
+  const txt = isDark ? '#d1d5db' : '#374151'
+  const sub = isDark ? '#6b7280' : '#94a3b8'
 
   const levels = isLive ? [
-    { color: '#dc2626', label: '🔴 Sangat Tinggi (≥0.8)' },
-    { color: '#ef4444', label: '🟠 Tinggi (0.6-0.8)' },
-    { color: '#f97316', label: '🟡 Sedang (0.4-0.6)' },
-    { color: '#eab308', label: '🟢 Rendah (0.2-0.4)' },
+    { color: '#dc2626', label: '🔴 AWAS (75-100)' },
+    { color: '#f97316', label: '🟠 SIAGA (50-75)' },
+    { color: '#eab308', label: '🟡 WASPADA (25-50)' },
+    { color: '#22c55e', label: '🟢 NORMAL (0-25)' },
   ] : [
     { color: '#ef4444', label: '🔴 Risiko Tinggi' },
     { color: '#f97316', label: '🟠 Risiko Sedang' },
@@ -199,31 +246,52 @@ function MapLegend({ isDark, isLive }) {
       boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
     }}>
       <p style={{ color: txt, fontWeight: 600, marginBottom: 8 }}>
-        Zona Banjir {isLive ? '(InaRisk BNPB)' : '(Estimasi)'}
+        {isLive ? 'Vulnerability Score per Kecamatan' : 'Zona Banjir (Estimasi)'}
       </p>
       {levels.map(({ color, label }) => (
         <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
-          <div style={{ width: 12, height: 12, borderRadius: 3, background: color, opacity: 0.75 }} />
+          <div style={{ width: 12, height: 12, borderRadius: 3, background: color, opacity: 0.8 }} />
           <span style={{ color: txt }}>{label}</span>
         </div>
       ))}
       <div style={{ borderTop: `1px solid ${bdr}`, paddingTop: 6, marginTop: 4, color: sub }}>
-        {isLive ? 'Sumber: InaRisk BNPB 2024' : 'Sumber: Estimasi (bukan data riil)'}
+        {isLive ? 'Klik kecamatan untuk detail' : '⚠️ Bukan data riil'}
       </div>
     </div>
   )
 }
 
-
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function MapView({ selectedCity }) {
-  const { theme }  = useTheme()
-  const isDark     = theme === 'dark'
-  const cityData   = CITY_CENTERS[selectedCity] ?? CITY_CENTERS.semarang
+  const { theme }   = useTheme()
+  const isDark      = theme === 'dark'
+  const cityData    = CITY_CENTERS[selectedCity] ?? CITY_CENTERS.semarang
 
-  // Fetch polygon dari InaRisk BNPB
-  const { polygons, loading: polygonsLoading } = useFloodPolygons(selectedCity)
-  const hasLivePolygons = polygons && polygons.features?.length > 0
+  // State: polygon vulnerability map (per-kecamatan)
+  const [vulnMap,      setVulnMap]      = useState(null)
+  const [vulnLoading,  setVulnLoading]  = useState(false)
+  const [selectedKec,  setSelectedKec]  = useState(null)
+
+  // Fallback: flood polygon biasa (hazard-colored)
+  const { polygons: floodPolygons, loading: fallbackLoading } = useFloodPolygons(selectedCity)
+
+  // Fetch vulnerability map per kota
+  useEffect(() => {
+    if (!selectedCity) return
+    setSelectedKec(null)
+    setVulnMap(null)
+    setVulnLoading(true)
+
+    getVulnerabilityMap(selectedCity)
+      .then(data => { setVulnMap(data); setVulnLoading(false) })
+      .catch(() => { setVulnLoading(false) })
+  }, [selectedCity])
+
+  // Gunakan vulnMap kalau ada, fallback ke floodPolygons, fallback ke mock
+  const activeGeojson  = vulnMap ?? floodPolygons
+  const hasLive        = activeGeojson && activeGeojson.features?.length > 0
+  const isLoading      = vulnLoading || fallbackLoading
+  const isVulnMode     = !!vulnMap
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: 420 }}>
@@ -241,43 +309,54 @@ export default function MapView({ selectedCity }) {
         <FlyToCity city={selectedCity} />
         <ZoomControl position="bottomright" />
 
-        {/* Overlay: InaRisk live polygons ATAU mock zones sebagai fallback */}
-        {hasLivePolygons
-          ? <LiveFloodLayer geojson={polygons} isDark={isDark} />
+        {hasLive
+          ? <LiveVulnLayer
+              geojson={activeGeojson}
+              isDark={isDark}
+              onKecamatanClick={setSelectedKec}
+            />
           : <MockFloodLayer city={selectedCity} isDark={isDark} />
         }
       </MapContainer>
 
       {/* Legend */}
-      <MapLegend isDark={isDark} isLive={hasLivePolygons} />
+      <MapLegend isDark={isDark} isLive={hasLive} isVulnMode={isVulnMode} />
 
-      {/* Loading indicator saat fetch polygon */}
-      {polygonsLoading && (
+      {/* Kecamatan detail panel (on click) */}
+      {selectedKec && (
+        <KecamatanPanel
+          kec={selectedKec}
+          isDark={isDark}
+          onClose={() => setSelectedKec(null)}
+        />
+      )}
+
+      {/* Loading indicator */}
+      {isLoading && (
         <div style={{
           position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
           zIndex: 400, background: isDark ? 'rgba(17,24,39,0.9)' : 'rgba(255,255,255,0.9)',
           border: `1px solid ${isDark ? '#374151' : '#e2e8f0'}`,
           borderRadius: 8, padding: '6px 14px', fontSize: 12,
-          color: isDark ? '#93c5fd' : '#3b82f6',
-          backdropFilter: 'blur(8px)',
+          color: isDark ? '#93c5fd' : '#3b82f6', backdropFilter: 'blur(8px)',
         }}>
-          ⟳ Memuat polygon InaRisk BNPB...
+          ⟳ {isVulnMode ? 'Memuat vulnerability map...' : 'Memuat polygon InaRisk...'}
         </div>
       )}
 
-      {/* City label */}
+      {/* City label + feature count */}
       <div style={{
         position: 'absolute', top: 12, right: 12, zIndex: 400,
         background: isDark ? 'rgba(17,24,39,0.9)' : 'rgba(255,255,255,0.9)',
         border: `1px solid ${isDark ? '#374151' : '#e2e8f0'}`,
         borderRadius: 8, padding: '6px 12px', fontSize: 13, fontWeight: 600,
-        color: isDark ? '#f3f4f6' : '#1e293b',
-        backdropFilter: 'blur(8px)',
+        color: isDark ? '#f3f4f6' : '#1e293b', backdropFilter: 'blur(8px)',
       }}>
         📍 {selectedCity.charAt(0).toUpperCase() + selectedCity.slice(1)}
-        {hasLivePolygons && (
-          <span style={{ marginLeft: 6, fontSize: 11, color: isDark ? '#6b7280' : '#94a3b8' }}>
-            ({polygons.features.length} kec.)
+        {hasLive && (
+          <span style={{ marginLeft: 6, fontSize: 11, color: isDark ? '#6b7280' : '#94a3b8', fontWeight: 400 }}>
+            {activeGeojson.features.length} kecamatan
+            {isVulnMode && <span style={{ marginLeft: 4, color: isDark ? '#60a5fa' : '#3b82f6' }}>● vuln</span>}
           </span>
         )}
       </div>

@@ -140,6 +140,7 @@ def _simplify_polygon(rings: list, tolerance: float = 0.0005) -> list:
     Simplifikasi polygon dengan Douglas-Peucker sederhana.
     Mengurangi jumlah titik untuk performa Leaflet lebih baik.
     Tolerance dalam derajat (0.0005 ≈ 50 meter).
+    Minimum 4 titik dipertahankan agar polygon tetap valid.
     """
     def dp_simplify(points: list, tol: float) -> list:
         if len(points) <= 2:
@@ -165,7 +166,15 @@ def _simplify_polygon(rings: list, tolerance: float = 0.0005) -> list:
             return left[:-1] + right
         return [start, end]
 
-    return [dp_simplify(ring, tolerance) for ring in rings]
+    result = []
+    for ring in rings:
+        simplified = dp_simplify(ring, tolerance)
+        # Polygon valid butuh minimal 4 titik (3 vertex + penutup)
+        # Kalau terlalu disederhanakan, kembalikan titik asli
+        if len(simplified) < 4:
+            simplified = ring
+        result.append(simplified)
+    return result
 
 
 # ── Flood Hazard per Point ────────────────────────────────────────────────────
@@ -327,6 +336,14 @@ def get_flood_polygons(city: str, force_refresh: bool = False) -> dict:
         simplified_rings = _simplify_polygon(kec["rings"], tolerance=0.0003)
         # Simpan dalam format standard GeoJSON [lon, lat]
         geojson_rings = _rings_to_geojson(simplified_rings)
+
+        # Skip feature jika geometry tidak valid (< 4 titik di semua rings)
+        valid_rings = [r for r in geojson_rings if len(r) >= 4]
+        if not valid_rings:
+            logger.warning(f"  Skip {kec['name']}: invalid geometry ({sum(len(r) for r in geojson_rings)} total points)")
+            continue
+
+        geojson_rings = valid_rings
 
         # Geometry type: Polygon jika 1 ring, MultiPolygon jika lebih
         if len(geojson_rings) == 1:

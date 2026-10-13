@@ -224,7 +224,7 @@ def _get_hazard_values(points: list[tuple]) -> dict[int, float]:
 
 
 # ── Main Function ─────────────────────────────────────────────────────────────
-def get_flood_polygons(city: str, force_refresh: bool = False) -> dict:
+def get_flood_polygons(city: str, force_refresh: bool = False, bbox: list | None = None) -> dict:
     """
     Ambil polygon kecamatan dengan nilai Indeks Bahaya Banjir.
 
@@ -246,16 +246,16 @@ def get_flood_polygons(city: str, force_refresh: bool = False) -> dict:
           - color (str):      Hex color untuk peta
     """
     city = city.lower()
-    if city not in CITY_BOUNDS:
-        raise ValueError(f"City '{city}' tidak dikenal. Pilihan: {list(CITY_BOUNDS)}")
+    if bbox is None:
+        if city not in CITY_BOUNDS:
+            raise ValueError(f"City '{city}' tidak dikenal. Pilihan: {list(CITY_BOUNDS)}")
+        bbox = CITY_BOUNDS[city]
 
     if not force_refresh:
         cached = _load_cache(city)
         if cached:
             logger.info(f"  Polygon cache hit: {city} ({len(cached.get('features', []))} kecamatan)")
             return cached
-
-    bbox = CITY_BOUNDS[city]
     logger.info(f"  Fetching kecamatan polygons untuk {city}...")
 
     # ── Step 1: Query batas kecamatan ─────────────────────────────────────────

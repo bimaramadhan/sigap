@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Bell, Map, BarChart2, MessageSquare, Droplets } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -12,6 +12,7 @@ import FloodInputPanel   from './components/FloodInputPanel.jsx'
 import { useAnalysis }   from './hooks/useAnalysis.js'
 import { useFloodReports } from './hooks/useFloodReports.js'
 import { MOCK_CITIES }   from './lib/mockData.js'
+import { getCities, getCity } from './lib/api.js'
 import { useTheme }      from './lib/ThemeContext.jsx'
 
 // Mobile tabs — 5 tabs sekarang
@@ -108,7 +109,9 @@ function Toast({ message, type, isDark }) {
 
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
-  const [selectedCity, setSelectedCity] = useState('semarang')
+  const [selectedCity, setSelectedCity] = useState('33.74')
+  const [cities, setCities] = useState(MOCK_CITIES)
+  const [cityMeta, setCityMeta] = useState(MOCK_CITIES[0])
   const [activeTab,    setActiveTab]    = useState('map')
   const [rightTab,     setRightTab]     = useState('briefing')
   const [toast,        setToast]        = useState(null)
@@ -116,9 +119,40 @@ export default function App() {
   const isDark     = theme === 'dark'
   const USE_MOCK   = import.meta.env.VITE_USE_MOCK === 'true'
 
+  useEffect(() => {
+    let cancelled = false
+    getCities().then(res => {
+      if (cancelled) return
+      const list = res.cities || []
+      if (!list.length) return
+      setCities(list)
+      const found = list.find(city => city.id === '33.74') || list[0]
+      setCityMeta(found)
+      setSelectedCity(found.id)
+    })
+    return () => { cancelled = true }
+  }, [])
+
+  const handleCityChange = (id) => {
+    setSelectedCity(id)
+    const meta = cities.find(city => city.id === id)
+    setCityMeta(meta || { id, label: id, bbox: null })
+    if (!meta?.bbox) {
+      getCity(id).then(detail => {
+        setCityMeta(detail)
+        setCities(prev => prev.map(city => city.id === id ? { ...city, bbox: detail.bbox } : city))
+      }).catch(() => {})
+    }
+  }
+
+  const located = cityMeta?.id === selectedCity
+    && Array.isArray(cityMeta?.bbox)
+    && cityMeta.bbox.length === 4
+  const activeCity = located ? selectedCity : ''
+
   // ── Analysis hook ──────────────────────────────────────────────────────────
   const { alerts, weather, vulnerability, narasi, loading, isLoading, lastUpdated, refresh }
-    = useAnalysis(selectedCity)
+    = useAnalysis(activeCity)
 
   // ── Flood reports hook ─────────────────────────────────────────────────────
   const onReportSuccess = useCallback(() => {
@@ -127,8 +161,8 @@ export default function App() {
     setTimeout(() => refresh(), 300)
   }, [refresh])
 
-  const { rivers, reports, submit: submitReport, clear: clearReports }
-    = useFloodReports(selectedCity, onReportSuccess)
+  const { villages, reports, kecamatanBoosts, submit: submitReport, clear: clearReports }
+    = useFloodReports(activeCity, onReportSuccess)
 
   // ── Toast helper ───────────────────────────────────────────────────────────
   const showToast = (message, type = 'success') => {
@@ -158,8 +192,8 @@ export default function App() {
       {/* Header */}
       <Header
         selectedCity={selectedCity}
-        cities={MOCK_CITIES}
-        onCityChange={setSelectedCity}
+        cities={cities}
+        onCityChange={handleCityChange}
         onRefresh={refresh}
         isLoading={isLoading}
         lastUpdated={lastUpdated}
@@ -222,7 +256,12 @@ export default function App() {
           activeTab !== 'map' && 'hidden lg:flex'
         )}>
           <div className="flex-1 p-3" style={{ minHeight: 0, height: 0 }}>
-            <MapView selectedCity={selectedCity} />
+            <MapView
+              selectedCity={selectedCity}
+              cityLabel={cityMeta?.label}
+              bbox={cityMeta?.bbox}
+              kecamatanBoosts={kecamatanBoosts}
+            />
           </div>
 
           {/* Status strip */}
@@ -302,7 +341,7 @@ export default function App() {
                 <SectionTitle icon={Droplets} title="Laporan Lapangan BPBD" />
                 <FloodInputPanel
                   city={selectedCity}
-                  rivers={rivers}
+                  villages={villages}
                   reports={reports}
                   isDark={isDark}
                   onSubmit={handleSubmitReport}

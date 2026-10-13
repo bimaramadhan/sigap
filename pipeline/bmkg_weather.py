@@ -9,11 +9,13 @@ Endpoint: https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4={kode}
 Format  : JSON, update 2x sehari
 ADM4    : Kode wilayah BPS level desa/kelurahan
 
+Sampel kecamatan diambil dari katalog wilayah, satu desa per kecamatan.
 Tidak butuh API key. Tidak butuh registrasi.
 """
 
 import os
 import json
+import threading
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -27,41 +29,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 load_dotenv()
 
 CACHE_DIR     = Path(os.getenv("CACHE_DIR", "data/cache"))
-CACHE_TTL_MIN = 60  # Cache 60 menit — BMKG update 2x sehari, tidak perlu terlalu sering
+CACHE_TTL_MIN = 360  # 6 jam — prakiraan BMKG tidak perlu diambil ulang tiap kota dibuka
 BASE_URL      = "https://api.bmkg.go.id/publik/prakiraan-cuaca"
-
-# ── ADM4 Codes per kota ────────────────────────────────────────────────────────
-# Kecamatan yang dipilih: area rawan banjir + area representatif kota
-# Format: kode BPS 4 level (provinsi.kabkota.kecamatan.desa)
-ADM4_CODES: dict[str, list[dict]] = {
-    "semarang": [
-        # Area rawan banjir utama Semarang
-        {"adm4": "33.74.01.1001", "kecamatan": "Semarang Tengah",  "area": "Miroto"},
-        {"adm4": "33.74.02.1001", "kecamatan": "Semarang Utara",   "area": "Bandarharjo"},
-        {"adm4": "33.74.12.1001", "kecamatan": "Genuk",            "area": "Genuksari"},
-        {"adm4": "33.74.06.1001", "kecamatan": "Pedurungan",       "area": "Penggaron Kidul"},
-        {"adm4": "33.74.16.1001", "kecamatan": "Tugu",             "area": "Mangkang Kulon"},
-    ],
-    "bekasi": [
-        {"adm4": "32.75.01.1001", "kecamatan": "Bekasi Utara",    "area": "Harapan Jaya"},
-        {"adm4": "32.75.02.1001", "kecamatan": "Bekasi Barat",    "area": "Bintara"},
-        {"adm4": "32.75.03.1001", "kecamatan": "Bekasi Selatan",  "area": "Marga Jaya"},
-        {"adm4": "32.75.04.1001", "kecamatan": "Bekasi Timur",    "area": "Aren Jaya"},
-    ],
-    "jakarta": [
-        {"adm4": "31.72.01.1001", "kecamatan": "Penjaringan",     "area": "Penjaringan"},
-        {"adm4": "31.73.01.1001", "kecamatan": "Cengkareng",      "area": "Cengkareng Barat"},
-        {"adm4": "31.71.01.1001", "kecamatan": "Gambir",          "area": "Gambir"},
-        {"adm4": "31.75.01.1001", "kecamatan": "Matraman",        "area": "Pisangan Baru"},
-    ],
-    "surabaya": [
-        {"adm4": "35.78.04.1001", "kecamatan": "Pabean Cantikan", "area": "Nyamplungan"},
-        {"adm4": "35.78.02.1001", "kecamatan": "Kenjeran",        "area": "Bulak Banteng"},
-        {"adm4": "35.78.03.1001", "kecamatan": "Semampir",        "area": "Ujung"},
-        {"adm4": "35.78.06.1001", "kecamatan": "Bulak",           "area": "Kedung Cowek"},
-        {"adm4": "35.78.05.1001", "kecamatan": "Bubutan",         "area": "Gundih"},
-    ],
-}
 
 # ── Weather Code Mapping (BMKG standard) ──────────────────────────────────────
 WEATHER_CODES = {
@@ -86,6 +55,18 @@ RAINFALL_THRESHOLDS = [
     (5,   "light",    3, "Hujan ringan (>5mm/12jam)"),
     (0,   "none",     0, "Tidak ada hujan signifikan"),
 ]
+
+_weather_locks: dict[str, threading.Lock] = {}
+_weather_guard = threading.Lock()
+
+
+def _weather_lock(city: str) -> threading.Lock:
+    with _weather_guard:
+        lock = _weather_locks.get(city)
+        if lock is None:
+            lock = threading.Lock()
+            _weather_locks[city] = lock
+        return lock
 
 
 # ── Cache ─────────────────────────────────────────────────────────────────────
@@ -202,23 +183,57 @@ def get_weather_summary(city: str) -> dict:
       - kecamatan_data     : detail per kecamatan
       - is_rainy_season    : estimasi apakah musim hujan (Oktober–April)
     """
-    city = city.lower()
-    if city not in ADM4_CODES:
-        logger.warning(f"Kota {city} tidak ada di ADM4_CODES, return default")
+    from engine.wilayah import canonical_kab
+
+    kab = canonical_kab(city)
+    if not kab:
+        logger.warning(f"Kota {city} tidak ada di katalog wilayah, return default")
         return _default_weather(city)
+    city = kab
+
+    with _weather_lock(city):
+        return _load_or_fetch_weather(city)
+
+
+def _store_weather(city: str, result: dict) -> dict:
+    _save_cache(city, result)
+    try:
+        from engine.db import save_weather
+        save_weather(city, result)
+    except Exception as exc:
+        logger.warning(f"  Gagal menyimpan cache cuaca: {exc}")
+    return result
+
+
+def _load_or_fetch_weather(city: str) -> dict:
+    from engine.wilayah import sample_adm4
+
+    try:
+        from engine.db import load_weather
+        cached_db = load_weather(city)
+        if cached_db:
+            logger.info(f"  Weather cache hit: {city}")
+            return cached_db
+    except Exception as exc:
+        logger.warning(f"  Cache cuaca database dilewati: {exc}")
 
     cached = _load_cache(city)
     if cached:
-        logger.info(f"  Weather cache hit: {city}")
+        logger.info(f"  Weather file cache hit: {city}")
         return cached
 
-    logger.info(f"  Fetching weather data untuk {city} ({len(ADM4_CODES[city])} kecamatan)...")
+    areas = sample_adm4(city, limit=16)
+    if not areas:
+        logger.warning(f"Tidak ada sampel kecamatan untuk {city}")
+        return _default_weather(city)
+
+    logger.info(f"  Fetching weather data untuk {city} ({len(areas)} kecamatan)...")
 
     kecamatan_results = []
     all_tp:      list[float] = []
     all_codes:   list[int]   = []
 
-    for area in ADM4_CODES[city]:
+    for area in areas:
         time.sleep(0.2)  # gentle rate limiting
         raw = _fetch_forecast(area["adm4"])
         if not raw:
@@ -250,7 +265,7 @@ def get_weather_summary(city: str) -> dict:
 
     if not kecamatan_results:
         logger.warning(f"  Tidak ada data weather untuk {city}")
-        return _default_weather(city)
+        return _store_weather(city, _default_weather(city))
 
     # Ambil nilai terburuk (paling konservatif untuk early warning)
     max_rainfall = max(all_tp) if all_tp else 0
@@ -285,12 +300,11 @@ def get_weather_summary(city: str) -> dict:
         "_source":           "BMKG Prakiraan Cuaca API",
     }
 
-    _save_cache(city, result)
     logger.success(
         f"  Weather {city}: rainfall={max_rainfall:.1f}mm/12h "
         f"| {code_info.get('label', '?')} | boost=+{boost}"
     )
-    return result
+    return _store_weather(city, result)
 
 
 def _default_weather(city: str) -> dict:

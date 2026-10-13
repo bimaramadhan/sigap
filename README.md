@@ -319,6 +319,7 @@ sigap/
 | Python | 3.10+ | [python.org](https://python.org) atau `brew install python@3.11` |
 | Node.js | 18+ | [nodejs.org](https://nodejs.org) atau `brew install node` |
 | Git | any | `brew install git` atau Xcode Command Line Tools |
+| Docker | any | [docker.com](https://www.docker.com/products/docker-desktop/) — untuk Postgres lokal |
 
 ---
 
@@ -362,16 +363,34 @@ GEMINI_MODEL=gemini-3.5-flash
 DEMO_MODE=false
 ```
 
-#### 4. Jalankan backend
+`DATABASE_URL` sudah ada di `.env.example` dan biasanya tidak perlu diubah:
+
+```
+DATABASE_URL=postgresql://sigap:sigap@localhost:5432/sigap
+```
+
+#### 4. Jalankan Postgres
+
+```bash
+docker compose up -d
+```
+
+Kalau perintah itu tidak dikenal, pakai `docker-compose up -d`.
+
+Postgres 16 jalan di `localhost:5432` (user `sigap`, password `sigap`, database `sigap`). Biarkan container ini hidup selama memakai API.
+
+#### 5. Jalankan backend
 
 ```bash
 # Pastikan .venv masih aktif (ada "(venv)" di awal prompt)
 uvicorn api.main:app --reload --port 8080
 ```
 
+Saat API pertama kali hidup, tabel dibuat dan katalog wilayah diisi sendiri dari file SQL di `knowledge/geografi/`. Tidak ada perintah migrasi terpisah. API tidak akan start jika Postgres belum jalan.
+
 API docs tersedia di: http://localhost:8080/docs
 
-#### 5. Jalankan frontend (terminal baru)
+#### 6. Jalankan frontend (terminal baru)
 
 ```bash
 cd frontend
@@ -391,7 +410,7 @@ Kalau masih `true`, edit file tersebut:
 echo "VITE_USE_MOCK=false" > frontend/.env.development
 ```
 
-#### 6. Test cepat data pipeline
+#### 7. Test cepat data pipeline
 
 ```bash
 # Test BMKG real-time (tidak butuh setup apapun)
@@ -430,19 +449,43 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-#### 4. Jalankan backend
+#### 4. Jalankan Postgres
+
+```powershell
+docker compose up -d
+```
+
+Kalau perintah itu tidak dikenal, pakai `docker-compose up -d`. Biarkan container ini hidup selama memakai API. `DATABASE_URL` di `.env` harus mengarah ke `localhost:5432`.
+
+#### 5. Jalankan backend
 
 ```powershell
 uvicorn api.main:app --reload --port 8080
 ```
 
-#### 5. Jalankan frontend (terminal baru)
+Tabel dan katalog wilayah dibuat sendiri saat API pertama kali hidup.
+
+#### 6. Jalankan frontend (terminal baru)
 
 ```powershell
 cd frontend
 npm install
 npm run dev
 ```
+
+---
+
+### Setelah `git pull`
+
+Kalau repo sudah terpasang dan yang baru ditarik memuat database:
+
+```bash
+docker compose up -d          # atau: docker-compose up -d
+pip install -r requirements.txt
+# restart uvicorn
+```
+
+Tidak perlu menjalankan file SQL secara manual. Restart API mengisi tabel yang belum ada, termasuk `wilayah` dan `wilayah_profil`.
 
 ---
 

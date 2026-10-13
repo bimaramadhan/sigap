@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: sigap
+      POSTGRES_PASSWORD: sigap
+      POSTGRES_DB: sigap
+    ports:
+      - "5432:5432"
+    volumes:
+      - sigap_pg:/var/lib/postgresql/data
+
+volumes:
+  sigap_pg:

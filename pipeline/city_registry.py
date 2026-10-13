@@ -316,8 +316,10 @@ def get_registry(auto_build: bool = True) -> dict:
 
     if auto_build:
         logger.info("Registry belum ada — building dari InaRisk...")
-        _cached_registry = build_registry()
-        return _cached_registry
+        built = build_registry()
+        if built:
+            _cached_registry = built
+        return built
 
     return {}
 
@@ -382,6 +384,25 @@ def search_cities(query: str, limit: int = 10) -> list[dict]:
         del r["score"]
 
     return results[:limit]
+
+
+def _bps_digits(value: str) -> str:
+    """11.05 dan 1105 adalah kode yang sama."""
+    return re.sub(r"\D", "", str(value or ""))
+
+
+def lookup_by_bps(kode_bps: str) -> Optional[tuple[str, dict]]:
+    """Cari entri registry dari kode BPS, misalnya 33.74 atau 3374."""
+    registry = get_registry()
+    target = str(kode_bps or "").strip()
+    if not registry or not target:
+        return None
+    target_digits = _bps_digits(target)
+    for key, data in registry.items():
+        code = str(data.get("kode_bps") or "").strip()
+        if code == target or _bps_digits(code) == target_digits:
+            return key, data
+    return None
 
 
 def lookup_city(name: str) -> Optional[dict]:

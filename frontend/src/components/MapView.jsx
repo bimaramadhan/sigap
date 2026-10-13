@@ -29,12 +29,45 @@ const MOCK_STYLE = {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
-function FlyToCity({ city }) {
+// Pindah kamera ke bounds polygon yang di-fetch (dinamis — jalan untuk kota manapun).
+// Fallback ke CITY_CENTERS statis kalau polygon belum ada.
+function FitToData({ geojson, city }) {
   const map = useMap()
-  const cfg = CITY_CENTERS[city]
+
   useEffect(() => {
-    if (cfg) map.flyTo(cfg.center, cfg.zoom, { duration: 1.2, easeLinearity: 0.3 })
-  }, [city]) // eslint-disable-line
+    // Prioritas 1: fit ke bounds semua polygon kecamatan
+    const feats = geojson?.features ?? []
+    if (feats.length > 0) {
+      let minLat = 90, minLng = 180, maxLat = -90, maxLng = -180
+      const scan = (coords) => {
+        for (const c of coords) {
+          if (typeof c[0] === 'number' && typeof c[1] === 'number') {
+            const [lng, lat] = c
+            if (lat < minLat) minLat = lat
+            if (lat > maxLat) maxLat = lat
+            if (lng < minLng) minLng = lng
+            if (lng > maxLng) maxLng = lng
+          } else {
+            scan(c)  // nested (Polygon/MultiPolygon rings)
+          }
+        }
+      }
+      for (const f of feats) scan(f.geometry?.coordinates ?? [])
+
+      if (minLat <= maxLat && minLng <= maxLng) {
+        map.flyToBounds(
+          [[minLat, minLng], [maxLat, maxLng]],
+          { duration: 1.0, padding: [20, 20] }
+        )
+        return
+      }
+    }
+
+    // Prioritas 2: fallback ke CITY_CENTERS statis (pakai nama kota, bukan kode)
+    const cfg = CITY_CENTERS[city]
+    if (cfg) map.flyTo(cfg.center, cfg.zoom, { duration: 1.0 })
+  }, [geojson, city]) // eslint-disable-line
+
   return null
 }
 
@@ -262,10 +295,11 @@ function MapLegend({ isDark, isLive }) {
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
-export default function MapView({ selectedCity }) {
+export default function MapView({ selectedCity, cityName }) {
   const { theme }   = useTheme()
   const isDark      = theme === 'dark'
-  const cityData    = CITY_CENTERS[selectedCity] ?? CITY_CENTERS.semarang
+  // Center awal: fallback ke tengah Indonesia (FitToData akan reposisi ke polygon)
+  const cityData    = CITY_CENTERS[selectedCity] ?? { center: [-2.5, 118.0], zoom: 5 }
 
   // State: polygon vulnerability map (per-kecamatan)
   const [vulnMap,      setVulnMap]      = useState(null)
@@ -306,7 +340,7 @@ export default function MapView({ selectedCity }) {
         }}
       >
         <ThemeTileLayer />
-        <FlyToCity city={selectedCity} />
+        <FitToData geojson={activeGeojson} city={selectedCity} />
         <ZoomControl position="bottomright" />
 
         {hasLive
@@ -352,7 +386,7 @@ export default function MapView({ selectedCity }) {
         borderRadius: 8, padding: '6px 12px', fontSize: 13, fontWeight: 600,
         color: isDark ? '#f3f4f6' : '#1e293b', backdropFilter: 'blur(8px)',
       }}>
-        📍 {selectedCity.charAt(0).toUpperCase() + selectedCity.slice(1)}
+        📍 {cityName || selectedCity}
         {hasLive && (
           <span style={{ marginLeft: 6, fontSize: 11, color: isDark ? '#6b7280' : '#94a3b8', fontWeight: 400 }}>
             {activeGeojson.features.length} kecamatan

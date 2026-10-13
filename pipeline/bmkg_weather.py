@@ -198,8 +198,9 @@ def get_weather_summary(city: str) -> dict:
 def _store_weather(city: str, result: dict) -> dict:
     _save_cache(city, result)
     try:
-        from engine.db import save_weather
-        save_weather(city, result)
+        from engine.db import db_available, save_weather
+        if db_available():
+            save_weather(city, result)
     except Exception as exc:
         logger.warning(f"  Gagal menyimpan cache cuaca: {exc}")
     return result
@@ -209,11 +210,12 @@ def _load_or_fetch_weather(city: str) -> dict:
     from engine.wilayah import sample_adm4
 
     try:
-        from engine.db import load_weather
-        cached_db = load_weather(city)
-        if cached_db:
-            logger.info(f"  Weather cache hit: {city}")
-            return cached_db
+        from engine.db import db_available, load_weather
+        if db_available():
+            cached_db = load_weather(city)
+            if cached_db:
+                logger.info(f"  Weather cache hit (DB): {city}")
+                return cached_db
     except Exception as exc:
         logger.warning(f"  Cache cuaca database dilewati: {exc}")
 

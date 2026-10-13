@@ -310,7 +310,7 @@ export default function App() {
               activeTab !== 'map' && 'hidden lg:flex'
             )}>
               <div className="flex-1 p-3" style={{ minHeight: 0, height: 0 }}>
-                <MapView selectedCity={selectedCity} />
+                <MapView selectedCity={selectedCity} cityName={cityName} />
               </div>
 
               {/* Status strip */}

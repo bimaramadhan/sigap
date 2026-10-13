@@ -264,7 +264,7 @@ export async function getFloodPolygons(city) {
 export async function getVulnerabilityMap(city) {
   if (USE_MOCK) return null   // mock mode: MapView pakai flood polygons biasa
   try {
-    const { data } = await http.get(`/vulnerability-map/${city}`, { timeout: 45000 })
+    const { data } = await http.get(`/vulnerability-map/${city}`, { timeout: 120000 })
     return data
   } catch (e) {
     console.warn(`Vulnerability map tidak tersedia (${city}), fallback ke flood polygons`)

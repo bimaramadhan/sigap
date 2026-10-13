@@ -1,11 +1,12 @@
+import { RefreshCw, Wifi, WifiOff, Clock, Sun, Moon, Map, FileText, Search } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { RefreshCw, Wifi, WifiOff, Clock, Sun, Moon, Search } from 'lucide-react'
 import clsx from 'clsx'
 import { useTheme } from '../lib/ThemeContext.jsx'
 
 export default function Header({
   selectedCity, cities, onCityChange,
-  onRefresh, isLoading, lastUpdated, isLive
+  onRefresh, isLoading, lastUpdated, isLive,
+  currentPath = '/', onNavigate = () => { },
 }) {
   const { theme, toggleTheme } = useTheme()
   const isDark = theme === 'dark'
@@ -18,10 +19,10 @@ export default function Header({
     const q = query.trim().toLowerCase()
     const source = q
       ? cities.filter(city =>
-          city.label?.toLowerCase().includes(q) ||
-          city.province?.toLowerCase().includes(q) ||
-          city.id?.includes(q)
-        )
+        city.label?.toLowerCase().includes(q) ||
+        city.province?.toLowerCase().includes(q) ||
+        city.id?.includes(q)
+      )
       : cities
     return source.slice(0, 30)
   }, [cities, query])
@@ -42,24 +43,71 @@ export default function Header({
 
   return (
     <header className={clsx(
-      'flex items-center justify-between px-5 py-3 shrink-0 border-b',
+      'flex items-center justify-between px-4 md:px-5 py-3 shrink-0 border-b gap-3 flex-wrap sm:flex-nowrap',
       isDark
         ? 'bg-gray-900 border-gray-800'
         : 'bg-white border-gray-200'
     )}>
-      {/* Logo */}
-      <div className="flex items-center gap-2.5">
-        <span className="text-2xl">🌊</span>
-        <div>
-          <h1 className={clsx('font-bold text-lg leading-none',
-            isDark ? 'text-white' : 'text-gray-900'
-          )}>SIGAP</h1>
-          <p className={clsx('text-xs leading-none mt-0.5',
-            isDark ? 'text-gray-400' : 'text-gray-500'
-          )}>
-            Sistem Penanggulangan Banjir
-          </p>
+      {/* Left section: Logo & Nav */}
+      <div className="flex items-center gap-4">
+        {/* Logo */}
+        <div
+          onClick={() => onNavigate('/')}
+          className="flex items-center gap-2.5 cursor-pointer select-none"
+          title="Ke Dashboard"
+        >
+          <span className="text-2xl">🌊</span>
+          <div>
+            <h1 className={clsx('font-bold text-lg leading-none',
+              isDark ? 'text-white' : 'text-gray-900'
+            )}>SIGAP</h1>
+            <p className={clsx('text-xs leading-none mt-0.5',
+              isDark ? 'text-gray-400' : 'text-gray-500'
+            )}>
+              Sistem Penanggulangan Banjir
+            </p>
+          </div>
         </div>
+
+        {/* Navigation Tabs */}
+        <nav className={clsx(
+          'flex items-center gap-1 p-1 rounded-xl border text-xs',
+          isDark ? 'bg-gray-800/80 border-gray-700/80' : 'bg-gray-100 border-gray-200'
+        )}>
+          <button
+            type="button"
+            onClick={() => onNavigate('/')}
+            className={clsx(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition-all',
+              currentPath === '/'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : isDark
+                  ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-700/50'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/60'
+            )}
+          >
+            <Map size={13} />
+            <span className="hidden sm:inline">Dashboard</span>
+            <span className="sm:hidden">Peta</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigate('/report')}
+            className={clsx(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition-all',
+              currentPath === '/report'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : isDark
+                  ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-700/50'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/60'
+            )}
+          >
+            <FileText size={13} />
+            <span className="hidden sm:inline">Laporan & Briefing</span>
+            <span className="sm:hidden">Laporan</span>
+          </button>
+        </nav>
       </div>
 
       {/* City selector */}
@@ -115,34 +163,37 @@ export default function Header({
             </div>
           )}
         </div>
-      </div>
+      </div >
 
       {/* Right controls */}
-      <div className="flex items-center gap-3">
+      < div className="flex items-center gap-3" >
         {/* Live indicator */}
-        <div className="flex items-center gap-1.5">
-          {isLive
-            ? <Wifi size={13} className="text-green-500" />
-            : <WifiOff size={13} className="text-yellow-500" />
+        < div className="flex items-center gap-1.5" >
+          {
+            isLive
+              ? <Wifi size={13} className="text-green-500" />
+              : <WifiOff size={13} className="text-yellow-500" />
           }
           <span className={clsx('text-xs',
             isLive ? 'text-green-500' : 'text-yellow-500'
           )}>
             {isLive ? 'Live' : 'Mock'}
           </span>
-        </div>
+        </div >
 
         {/* Last updated */}
-        {lastUpdated && (
-          <div className={clsx('flex items-center gap-1 text-xs',
-            isDark ? 'text-gray-500' : 'text-gray-400'
-          )}>
-            <Clock size={11} />
-            {lastUpdated.toLocaleTimeString('id-ID', {
-              hour: '2-digit', minute: '2-digit', second: '2-digit'
-            })}
-          </div>
-        )}
+        {
+          lastUpdated && (
+            <div className={clsx('flex items-center gap-1 text-xs',
+              isDark ? 'text-gray-500' : 'text-gray-400'
+            )}>
+              <Clock size={11} />
+              {lastUpdated.toLocaleTimeString('id-ID', {
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+              })}
+            </div>
+          )
+        }
 
         {/* Dark/Light toggle */}
         <button
@@ -171,7 +222,7 @@ export default function Header({
           <RefreshCw size={13} className={clsx(isLoading && 'animate-spin')} />
           Refresh
         </button>
-      </div>
-    </header>
+      </div >
+    </header >
   )
 }

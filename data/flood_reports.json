@@ -1,0 +1,67 @@
+{
+  "semarang": [
+    {
+      "id": "semarang_1791893089299",
+      "city": "semarang",
+      "reported_at": "2026-10-13T12:04:49.299607+00:00",
+      "reporter": "Nanta",
+      "river_name": "Sungai Beringin",
+      "water_level_cm": 100,
+      "river_level": "waspada",
+      "river_level_label": "🟡 Waspada",
+      "flooded_areas": [],
+      "notes": "naik",
+      "boost_score": 8,
+      "boost_breakdown": {
+        "total": 8,
+        "river_boost": 8,
+        "area_boost": 0,
+        "river_level": "waspada",
+        "areas_count": 0,
+        "reason": "TMA WASPADA (+8)"
+      }
+    },
+    {
+      "id": "semarang_1791893040760",
+      "city": "semarang",
+      "reported_at": "2026-10-13T12:04:00.760723+00:00",
+      "reporter": "Armu",
+      "river_name": "Sungai Banjirkanal Timur",
+      "water_level_cm": 100,
+      "river_level": "waspada",
+      "river_level_label": "🟡 Waspada",
+      "flooded_areas": [],
+      "notes": "mulai naik",
+      "boost_score": 8,
+      "boost_breakdown": {
+        "total": 8,
+        "river_boost": 8,
+        "area_boost": 0,
+        "river_level": "waspada",
+        "areas_count": 0,
+        "reason": "TMA WASPADA (+8)"
+      }
+    },
+    {
+      "id": "semarang_1791892866195",
+      "city": "semarang",
+      "reported_at": "2026-10-13T12:01:06.195698+00:00",
+      "reporter": "Dwi",
+      "river_name": "Sungai Banjirkanal Barat",
+      "water_level_cm": 100,
+      "river_level": "waspada",
+      "river_level_label": "🟡 Waspada",
+      "flooded_areas": [],
+      "notes": "mulai naik",
+      "boost_score": 8,
+      "boost_breakdown": {
+        "total": 8,
+        "river_boost": 8,
+        "area_boost": 0,
+        "river_level": "waspada",
+        "areas_count": 0,
+        "reason": "TMA WASPADA (+8)"
+      }
+    }
+  ]
+}

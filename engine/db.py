@@ -27,15 +27,28 @@ BASELINE_TTL = timedelta(days=7)
 
 
 def database_url() -> str:
-    return os.getenv("DATABASE_URL", DEFAULT_URL)
+    base = os.getenv("DATABASE_URL", DEFAULT_URL)
+    # Tambahkan connect_timeout=3 agar gagal cepat jika Postgres tidak ada
+    if "connect_timeout" not in base:
+        sep = "&" if "?" in base else "?"
+        base = f"{base}{sep}connect_timeout=3"
+    return base
 
 
 def connect():
     return psycopg.connect(database_url(), row_factory=dict_row)
 
 
+_DB_AVAILABLE: bool = False
+
+
+def db_available() -> bool:
+    return _DB_AVAILABLE
+
+
 def init_db() -> None:
     """Buat tabel dan isi wilayah sekali jika belum lengkap."""
+    global _DB_AVAILABLE
     schema = SCHEMA_PATH.read_text(encoding="utf-8")
     statements = [part.strip() for part in schema.split(";") if part.strip()]
     with connect() as conn:
@@ -46,6 +59,7 @@ def init_db() -> None:
         _seed_wilayah_profil(conn)
         _import_legacy_reports(conn)
         conn.commit()
+    _DB_AVAILABLE = True
     logger.info("Database siap")
 
 

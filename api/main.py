@@ -37,8 +37,16 @@ load_dotenv()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    from engine.db import init_db
-    init_db()
+    try:
+        from engine.db import init_db
+        init_db()
+        logger.success("Database PostgreSQL terhubung")
+    except Exception as e:
+        logger.warning(
+            f"Database tidak tersedia ({type(e).__name__}: {e}). "
+            "Backend tetap jalan dengan file-based cache. "
+            "Jalankan 'docker compose up -d' untuk full persistence."
+        )
     yield
 
 

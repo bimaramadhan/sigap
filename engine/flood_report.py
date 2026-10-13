@@ -1,20 +1,18 @@
 """
 engine/flood_report.py
 ──────────────────────
-Laporan lapangan dari koordinator BPBD, disimpan di Postgres.
+Laporan lapangan dari koordinator BPBD.
 
-Koordinator memilih satu desa/kelurahan. Kecamatan induk diambil dari
-kode wilayah. Laporan menaikkan skor kota selama 12 jam dan menandai
-kecamatan di peta. Riwayat laporan tetap tersimpan setelah jendela itu.
+Primary storage: Postgres. Fallback: data/flood_reports.json (tanpa DB).
 """
 
+import json
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from loguru import logger
-from psycopg.types.json import Jsonb
 
-from engine.db import connect, peek_base_score
 from engine.wilayah import canonical_kab, resolve_village
 
 FLOOD_LEVEL_BOOST = {
@@ -31,7 +29,62 @@ LEVEL_LABELS = {
     "awas":     {"label": "🔴 Awas",     "color": "red"},
 }
 
-REPORT_WINDOW = timedelta(hours=12)
+REPORT_WINDOW  = timedelta(hours=12)
+_REPORTS_FILE  = Path("data/flood_reports.json")
+
+
+# ── File-based fallback ───────────────────────────────────────────────────────
+
+def _file_load() -> dict:
+    """Load semua laporan dari JSON file."""
+    if not _REPORTS_FILE.exists():
+        return {}
+    try:
+        return json.loads(_REPORTS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _file_save(data: dict) -> None:
+    _REPORTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _REPORTS_FILE.write_text(json.dumps(data, default=str, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _file_add(kab: str, row: dict) -> None:
+    data = _file_load()
+    if kab not in data:
+        data[kab] = []
+    row_serializable = {k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in row.items()}
+    data[kab].insert(0, row_serializable)
+    _file_save(data)
+
+
+def _file_get(kab: str, limit: int = 10) -> list:
+    return _file_load().get(kab, [])[:limit]
+
+
+def _file_recent(kab: str) -> list:
+    cutoff = datetime.now(timezone.utc) - REPORT_WINDOW
+    rows = []
+    for r in _file_load().get(kab, []):
+        ts = r.get("reported_at", "")
+        try:
+            dt = datetime.fromisoformat(ts) if isinstance(ts, str) else ts
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            if dt > cutoff:
+                rows.append(r)
+        except Exception:
+            pass
+    return rows
+
+
+def _file_clear(kab: str) -> int:
+    data = _file_load()
+    count = len(data.get(kab, []))
+    data[kab] = []
+    _file_save(data)
+    return count
 
 
 def _normalize_level(level: str) -> str:
@@ -90,10 +143,6 @@ def add_report(
     flood_level: str,
     notes:       str = "",
 ) -> dict:
-    """
-    Tambah laporan banjir untuk satu desa.
-    Kecamatan diisi dari katalog wilayah. Desa di luar kota ditolak.
-    """
     kab = _require_kab(city)
     village = resolve_village(kab, desa_kode)
     flood_level = _normalize_level(flood_level)
@@ -114,25 +163,36 @@ def add_report(
         "reporter": reporter or "Koordinator BPBD",
         "notes": notes or "",
         "reported_at": reported_at,
-        "base_score_at_report": peek_base_score(kab),
+        "base_score_at_report": None,
     }
 
-    with connect() as conn:
-        conn.execute(
-            """
-            INSERT INTO flood_reports (
-                id, kab_kode, desa_kode, desa_name, kecamatan_kode, kecamatan,
-                flood_level, boost_score, boost_breakdown, reporter, notes,
-                reported_at, base_score_at_report
-            ) VALUES (
-                %(id)s, %(kab_kode)s, %(desa_kode)s, %(desa_name)s, %(kecamatan_kode)s,
-                %(kecamatan)s, %(flood_level)s, %(boost_score)s, %(boost_breakdown)s,
-                %(reporter)s, %(notes)s, %(reported_at)s, %(base_score_at_report)s
-            )
-            """,
-            {**row, "boost_breakdown": Jsonb(boost)},
-        )
-        conn.commit()
+    from engine.db import db_available
+    if db_available():
+        try:
+            from psycopg.types.json import Jsonb
+            from engine.db import connect, peek_base_score
+            row["base_score_at_report"] = peek_base_score(kab)
+            with connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO flood_reports (
+                        id, kab_kode, desa_kode, desa_name, kecamatan_kode, kecamatan,
+                        flood_level, boost_score, boost_breakdown, reporter, notes,
+                        reported_at, base_score_at_report
+                    ) VALUES (
+                        %(id)s, %(kab_kode)s, %(desa_kode)s, %(desa_name)s, %(kecamatan_kode)s,
+                        %(kecamatan)s, %(flood_level)s, %(boost_score)s, %(boost_breakdown)s,
+                        %(reporter)s, %(notes)s, %(reported_at)s, %(base_score_at_report)s
+                    )
+                    """,
+                    {**row, "boost_breakdown": Jsonb(boost)},
+                )
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"  DB write gagal, fallback file: {e}")
+            _file_add(kab, row)
+    else:
+        _file_add(kab, row)
 
     logger.success(
         f"  Field report: {kab} | {village['nama']} ({village['kecamatan']}) "
@@ -142,47 +202,45 @@ def add_report(
 
 
 def get_reports(city: str, limit: int = 10) -> list[dict]:
-    """Riwayat laporan terbaru untuk satu kab/kota, tidak dibatasi 12 jam."""
     kab = _require_kab(city)
-    with connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT * FROM flood_reports
-            WHERE kab_kode = %s
-            ORDER BY reported_at DESC
-            LIMIT %s
-            """,
-            (kab, limit),
-        ).fetchall()
-    return [_public_report(row) for row in rows]
+    from engine.db import db_available
+    if db_available():
+        try:
+            from engine.db import connect
+            with connect() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM flood_reports WHERE kab_kode = %s ORDER BY reported_at DESC LIMIT %s",
+                    (kab, limit),
+                ).fetchall()
+            return [_public_report(row) for row in rows]
+        except Exception as e:
+            logger.warning(f"  DB read gagal, fallback file: {e}")
+    return [_public_report(r) for r in _file_get(kab, limit)]
 
 
 def _recent_reports(kab: str) -> list[dict]:
     cutoff = datetime.now(timezone.utc) - REPORT_WINDOW
-    with connect() as conn:
-        return conn.execute(
-            """
-            SELECT * FROM flood_reports
-            WHERE kab_kode = %s AND reported_at > %s
-            ORDER BY reported_at DESC
-            """,
-            (kab, cutoff),
-        ).fetchall()
+    from engine.db import db_available
+    if db_available():
+        try:
+            from engine.db import connect
+            with connect() as conn:
+                return conn.execute(
+                    "SELECT * FROM flood_reports WHERE kab_kode = %s AND reported_at > %s ORDER BY reported_at DESC",
+                    (kab, cutoff),
+                ).fetchall()
+        except Exception as e:
+            logger.warning(f"  DB read recent gagal, fallback file: {e}")
+    return _file_recent(kab)
 
 
 def get_latest_boost(city: str) -> dict:
-    """
-    Boost tertinggi dari laporan 12 jam terakhir untuk seluruh kab/kota.
-    Bukan jumlah semua kecamatan.
-    """
     kab = canonical_kab(city)
     if not kab:
         return {"boost_score": 0, "reason": "", "report_count": 0}
-
     recent = _recent_reports(kab)
     if not recent:
         return {"boost_score": 0, "reason": "", "report_count": 0}
-
     best = max(recent, key=lambda row: row.get("boost_score") or 0)
     total = best.get("boost_score") or 0
     reason = (best.get("boost_breakdown") or {}).get("reason", "")
@@ -194,16 +252,11 @@ def get_latest_boost(city: str) -> dict:
     }
 
 
-def get_kecamatan_boosts(city: str) -> dict[str, dict]:
-    """
-    Boost tertinggi per nama kecamatan pada jendela 12 jam yang sama.
-    Kunci adalah nama kecamatan supaya bisa dicocokkan ke WADMKC.
-    """
+def get_kecamatan_boosts(city: str) -> dict:
     kab = canonical_kab(city)
     if not kab:
         return {}
-
-    best_by_name: dict[str, dict] = {}
+    best_by_name: dict = {}
     for report in _recent_reports(kab):
         name = (report.get("kecamatan") or "").strip()
         if not name:
@@ -223,14 +276,17 @@ def get_kecamatan_boosts(city: str) -> dict[str, dict]:
 
 
 def clear_reports(city: str) -> int:
-    """Hapus semua laporan untuk satu kab/kota. Return jumlah yang dihapus."""
     kab = _require_kab(city)
-    with connect() as conn:
-        deleted = conn.execute(
-            "DELETE FROM flood_reports WHERE kab_kode = %s",
-            (kab,),
-        )
-        count = deleted.rowcount
-        conn.commit()
-    logger.info(f"Cleared {count} reports for {kab}")
-    return count
+    from engine.db import db_available
+    if db_available():
+        try:
+            from engine.db import connect
+            with connect() as conn:
+                deleted = conn.execute("DELETE FROM flood_reports WHERE kab_kode = %s", (kab,))
+                count = deleted.rowcount
+                conn.commit()
+            _file_clear(kab)
+            return count
+        except Exception as e:
+            logger.warning(f"  DB delete gagal, fallback file: {e}")
+    return _file_clear(kab)

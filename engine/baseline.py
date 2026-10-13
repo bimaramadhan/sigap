@@ -14,6 +14,7 @@ from loguru import logger
 
 from engine.db import (
     baseline_is_fresh,
+    db_available,
     list_stale_baselines,
     load_baseline,
     save_baseline,
@@ -109,10 +110,16 @@ def ensure_baseline(city: str, force: bool = False) -> dict:
     """
     Baseline segar untuk satu kab/kota.
     Kota yang belum pernah dibuka di-fetch saat dipanggil.
+
+    Kalau Postgres tidak tersedia, fallback ke file cache dari inarisk_loader.
     """
     kab = canonical_kab(city)
     if not kab:
         raise ValueError(f"Kab/kota '{city}' tidak ada di katalog wilayah")
+
+    # ── Fallback: tanpa DB → pakai inarisk_loader file cache langsung ─────────
+    if not db_available():
+        return _ensure_baseline_filecache(kab)
 
     with _city_lock(kab):
         if not force:
@@ -122,11 +129,46 @@ def ensure_baseline(city: str, force: bool = False) -> dict:
         return _fetch_and_store(kab)
 
 
+def _ensure_baseline_filecache(kab_kode: str) -> dict:
+    """Fallback tanpa Postgres — pakai inarisk_loader dengan file cache 24 jam."""
+    from pipeline.inarisk_loader import get_features_for_vulnerability
+    from engine.wilayah import lookup_kab
+
+    kab_info = lookup_kab(kab_kode)
+    label    = kab_info["label"] if kab_info else kab_kode
+
+    logger.debug(f"  baseline fallback (no DB): {label}")
+    features = get_features_for_vulnerability(kab_kode)
+    if not features.get("config"):
+        bbox = resolve_bbox(kab_kode) or [0, 0, 0, 0]
+        features["config"] = {
+            "label":    label,
+            "province": kab_info["province"] if kab_info else "",
+            "bbox":     bbox,
+        }
+    return {
+        "kab_kode":       kab_kode,
+        "features":       features,
+        "features_json":  features,
+        "base_score":     0,            # scored live in scoring.py
+        "polygons_json":  None,
+        "fetched_at":     __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+        "fetched_at_iso": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "age_hours":      0,
+        "source":         "file-cache",
+    }
+
+
 def get_polygons(city: str, force: bool = False) -> dict:
     """GeoJSON kecamatan dari cache baseline, di-refresh jika kosong atau basi."""
     kab = canonical_kab(city)
     if not kab:
         raise ValueError(f"Kab/kota '{city}' tidak ada di katalog wilayah")
+
+    # Fallback tanpa DB → query inarisk_polygon langsung (punya file cache sendiri)
+    if not db_available():
+        from pipeline.inarisk_polygon import get_flood_polygons
+        return get_flood_polygons(kab)
 
     cached = load_baseline(kab, with_polygons=True)
     fresh = bool(cached) and baseline_is_fresh(cached["fetched_at"])

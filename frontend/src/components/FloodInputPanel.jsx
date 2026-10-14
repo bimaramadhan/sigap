@@ -13,7 +13,7 @@
  * yang dapat mengisi dan mengirimkan laporan.
  */
 
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import {
   Send,
   Droplets,
@@ -206,6 +206,21 @@ export default function FloodInputPanel({
   const [submitting, setSubmitting] = useState(false)
   const [submitted,  setSubmitted]  = useState(false)
   const [error,      setError]      = useState('')
+
+  // Searchable desa combobox
+  const [desaOpen, setDesaOpen] = useState(false)
+  const desaComboRef = useRef(null)
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (desaComboRef.current && !desaComboRef.current.contains(e.target)) {
+        setDesaOpen(false)
+        setFilter('')
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   // Sync reporter name when user logs in / out
   useEffect(() => {
@@ -421,50 +436,132 @@ export default function FloodInputPanel({
           </div>
         </div>
 
-        {/* Cari Desa Field */}
+        {/* Pilihan Desa — Searchable Combobox */}
         <div>
           <label className={labelCls}>
-            Cari desa / kelurahan {hasVillages ? <span className="opacity-75 font-normal">({totalVillages} desa di {villages.length} kecamatan)</span> : ''}
+            Desa / Kelurahan *
+            {cityName ? <span className="text-blue-500 font-semibold ml-1">({cityName})</span> : ''}
+            {hasVillages && <span className="opacity-60 font-normal ml-1">({totalVillages} desa, {villages.length} kecamatan)</span>}
           </label>
-          <input
-            type="text"
-            placeholder={isAuthenticated ? "Ketik nama desa atau kecamatan" : "Login Google terlebih dahulu"}
-            value={filter}
-            onChange={e => setFilter(e.target.value)}
-            disabled={!hasVillages || !isAuthenticated}
-            className={inputCls}
-          />
-        </div>
 
-        {/* Pilihan Desa */}
-        <div>
-          <label className={labelCls}>
-            Desa / Kelurahan * {cityName ? <span className="text-blue-500 font-semibold">({cityName})</span> : ''}
-          </label>
-          <select
-            value={desaKode}
-            onChange={e => setDesaKode(e.target.value)}
-            required
-            disabled={!hasVillages || !isAuthenticated}
-            className={clsx(inputCls, isAuthenticated && 'cursor-pointer')}
-          >
-            <option value="">
-              {!isAuthenticated
-                ? '🔒 Login dengan Google untuk memilih desa...'
-                : hasVillages
-                  ? `Pilih desa / kelurahan (${totalVillages} desa)...`
-                  : loading ? 'Memuat data desa...' : 'Belum ada data desa untuk wilayah ini'}
-            </option>
-            {visibleGroups.map(group => (
-              <optgroup key={group.kecamatan_kode} label={groupLabel(group, showKota)}>
-                {group.villages.map(village => (
-                  <option key={village.kode} value={village.kode}>
-                    {village.nama}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
+          <div ref={desaComboRef} className="relative">
+            {/* Trigger button */}
+            <button
+              type="button"
+              onClick={() => {
+                if (!isAuthenticated || !hasVillages) return
+                setDesaOpen((o) => !o)
+                setFilter('')
+              }}
+              disabled={!isAuthenticated || !hasVillages}
+              className={clsx(
+                inputCls,
+                'flex items-center justify-between gap-2 text-left',
+                isAuthenticated && hasVillages && 'cursor-pointer'
+              )}
+            >
+              <span className={clsx(
+                'flex-1 truncate',
+                !desaKode && (isDark ? 'text-gray-500' : 'text-gray-400')
+              )}>
+                {desaKode && selectedVillage
+                  ? selectedVillage.nama
+                  : !isAuthenticated
+                    ? '🔒 Login dengan Google untuk memilih desa...'
+                    : hasVillages
+                      ? `Pilih desa / kelurahan...`
+                      : loading ? 'Memuat data desa...' : 'Belum ada data desa untuk wilayah ini'
+                }
+              </span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14" height="14" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" strokeWidth="2.5"
+                strokeLinecap="round" strokeLinejoin="round"
+                className={clsx('shrink-0 transition-transform duration-200 opacity-50', desaOpen ? 'rotate-180' : '')}
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+
+            {/* Dropdown */}
+            {desaOpen && (
+              <div className={clsx(
+                'absolute top-full left-0 right-0 mt-1.5 z-50 rounded-xl border shadow-2xl overflow-hidden',
+                isDark ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'
+              )}>
+                {/* Search input */}
+                <div className={clsx(
+                  'px-3 py-2 border-b',
+                  isDark ? 'border-gray-700' : 'border-gray-200'
+                )}>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                    placeholder="Cari nama desa atau kecamatan..."
+                    className={clsx(
+                      'w-full text-xs px-2.5 py-1.5 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition',
+                      isDark
+                        ? 'bg-gray-800 border-gray-600 text-white placeholder-gray-500'
+                        : 'bg-gray-50 border-gray-300 text-gray-900 placeholder-gray-400'
+                    )}
+                  />
+                </div>
+
+                {/* Village list grouped by kecamatan */}
+                <div className="max-h-60 overflow-y-auto py-1">
+                  {visibleGroups.length > 0 ? visibleGroups.map(group => (
+                    <div key={group.kecamatan_kode}>
+                      {/* Kecamatan group header */}
+                      <div className={clsx(
+                        'px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider sticky top-0',
+                        isDark ? 'bg-gray-800/90 text-gray-400' : 'bg-gray-100/90 text-gray-500'
+                      )}>
+                        {groupLabel(group, showKota)}
+                      </div>
+                      {/* Villages */}
+                      {group.villages.map(village => (
+                        <button
+                          key={village.kode}
+                          type="button"
+                          onClick={() => {
+                            setDesaKode(village.kode)
+                            setDesaOpen(false)
+                            setFilter('')
+                            setError('')
+                          }}
+                          className={clsx(
+                            'w-full flex items-center gap-2 px-4 py-2 text-xs text-left transition-colors',
+                            village.kode === desaKode
+                              ? isDark ? 'bg-blue-600/30 text-blue-300' : 'bg-blue-50 text-blue-700'
+                              : isDark ? 'text-gray-200 hover:bg-gray-800' : 'text-gray-800 hover:bg-gray-100'
+                          )}
+                        >
+                          {village.kode === desaKode && (
+                            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24"
+                              fill="none" stroke="currentColor" strokeWidth="3"
+                              strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          )}
+                          <span className={village.kode !== desaKode ? 'ml-[14px]' : ''}>
+                            {village.nama}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )) : (
+                    <p className={clsx('px-4 py-4 text-xs text-center', isDark ? 'text-gray-500' : 'text-gray-400')}>
+                      Tidak ditemukan
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           {selectedVillage && (
             <p className={clsx('text-xs mt-1.5', isDark ? 'text-gray-400' : 'text-gray-500')}>
               Kecamatan: <span className="font-semibold">{selectedVillage.kecamatan}</span>

@@ -11,7 +11,7 @@
  * - Mendukung layout berdampingan (2-kolom) di desktop dan tab switcher di mobile
  */
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
   MessageSquare,
   Droplets,
@@ -54,6 +54,28 @@ export default function ReportPage({
   // View mode: 'both' | 'briefing' | 'laporan'
   const [viewMode, setViewMode] = useState('both')
 
+  // Searchable city combobox state
+  const [citySearch, setCitySearch] = useState('')
+  const [cityOpen, setCityOpen] = useState(false)
+  const cityComboRef = useRef(null)
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (cityComboRef.current && !cityComboRef.current.contains(e.target)) {
+        setCityOpen(false)
+        setCitySearch('')
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const filteredCities = cities.filter((c) =>
+    (c.label || c.name || c.id).toLowerCase().includes(citySearch.toLowerCase())
+  )
+  const selectedCityLabel = cities.find((c) => c.id === selectedCity)
+  const displayCityName = selectedCityLabel ? (selectedCityLabel.label || selectedCityLabel.name || selectedCityLabel.id) : (cityName || selectedCity)
+
   const totalVillages = villages.reduce((acc, g) => acc + (g.villages?.length || 0), 0)
   const totalKecamatan = villages.length
 
@@ -95,24 +117,89 @@ export default function ReportPage({
                   <MapPin size={13} className="text-blue-500 shrink-0" />
                   <span className={textMuted}>Kota/Kab:</span>
                   {cities && cities.length > 0 && onCityChange ? (
-                    <select
-                      value={selectedCity}
-                      onChange={(e) => onCityChange(e.target.value)}
-                      className={clsx(
-                        'bg-transparent font-bold cursor-pointer focus:outline-none',
-                        isDark ? 'text-white' : 'text-gray-900'
-                      )}
-                    >
-                      {cities.map((c) => (
-                        <option
-                          key={c.id}
-                          value={c.id}
-                          className={isDark ? 'bg-gray-900 text-white' : 'bg-white text-gray-900'}
+                    <div ref={cityComboRef} className="relative">
+                      <button
+                        type="button"
+                        onClick={() => { setCityOpen((o) => !o); setCitySearch('') }}
+                        className={clsx(
+                          'font-bold cursor-pointer focus:outline-none flex items-center gap-1 hover:opacity-80 transition-opacity',
+                          isDark ? 'text-white' : 'text-gray-900'
+                        )}
+                      >
+                        <span className="max-w-[160px] truncate">{displayCityName}</span>
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="10" height="10" viewBox="0 0 24 24"
+                          fill="none" stroke="currentColor" strokeWidth="2.5"
+                          strokeLinecap="round" strokeLinejoin="round"
+                          className={clsx('shrink-0 transition-transform duration-200', cityOpen ? 'rotate-180' : '')}
                         >
-                          {c.label || c.name || c.id}
-                        </option>
-                      ))}
-                    </select>
+                          <polyline points="6 9 12 15 18 9" />
+                        </svg>
+                      </button>
+
+                      {cityOpen && (
+                        <div className={clsx(
+                          'absolute top-full left-0 mt-2 z-50 w-64 rounded-xl border shadow-2xl overflow-hidden',
+                          isDark ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'
+                        )}>
+                          {/* Search input */}
+                          <div className={clsx(
+                            'px-3 py-2 border-b',
+                            isDark ? 'border-gray-700' : 'border-gray-200'
+                          )}>
+                            <input
+                              autoFocus
+                              type="text"
+                              value={citySearch}
+                              onChange={(e) => setCitySearch(e.target.value)}
+                              placeholder="Cari kota/kabupaten..."
+                              className={clsx(
+                                'w-full text-xs px-2.5 py-1.5 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition',
+                                isDark
+                                  ? 'bg-gray-800 border-gray-600 text-white placeholder-gray-500'
+                                  : 'bg-gray-50 border-gray-300 text-gray-900 placeholder-gray-400'
+                              )}
+                            />
+                          </div>
+
+                          {/* City list */}
+                          <ul className="max-h-52 overflow-y-auto py-1 text-xs">
+                            {filteredCities.length > 0 ? filteredCities.map((c) => (
+                              <li
+                                key={c.id}
+                                onClick={() => {
+                                  onCityChange(c.id)
+                                  setCityOpen(false)
+                                  setCitySearch('')
+                                }}
+                                className={clsx(
+                                  'flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors',
+                                  c.id === selectedCity
+                                    ? isDark ? 'bg-blue-600/30 text-blue-300' : 'bg-blue-50 text-blue-700'
+                                    : isDark ? 'text-gray-200 hover:bg-gray-800' : 'text-gray-800 hover:bg-gray-100'
+                                )}
+                              >
+                                {c.id === selectedCity && (
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" strokeWidth="3"
+                                    strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                                    <polyline points="20 6 9 17 4 12" />
+                                  </svg>
+                                )}
+                                <span className={c.id !== selectedCity ? 'ml-[14px]' : ''}>
+                                  {c.label || c.name || c.id}
+                                </span>
+                              </li>
+                            )) : (
+                              <li className={clsx('px-3 py-3 text-center', isDark ? 'text-gray-500' : 'text-gray-400')}>
+                                Tidak ditemukan
+                              </li>
+                            )}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     <span className="font-bold">{cityName || selectedCity}</span>
                   )}

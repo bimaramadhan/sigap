@@ -152,22 +152,51 @@ def _generate_with_aistudio(client, prompt: str) -> str:
     Generate narasi menggunakan Google AI Studio via google-genai SDK.
     Ref: https://ai.google.dev/gemini-api/docs/text-generation
 
-    thinking_budget=0 menonaktifkan mode "thinking" pada model Gemini 3.x
-    sehingga token tidak habis untuk proses reasoning internal.
+    Mengoptimalkan konfigurasi thinking:
+    - Model Flash Lite menggunakan thinking_level=MINIMAL (thinking_budget=0 tidak didukung)
+    - Model Flash standar mencoba thinking_budget=0 untuk menonaktifkan reasoning internal
+    - Fallback otomatis tanpa thinking_config jika model tidak mendukung opsi tersebut.
     """
     from google.genai import types
 
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-            temperature=0.4,
-            max_output_tokens=512,
-            thinking_config=types.ThinkingConfig(thinking_budget=0),
-        ),
-        contents=prompt,
-    )
-    return response.text.strip()
+    model_name = GEMINI_MODEL.lower()
+    if "lite" in model_name:
+        thinking_cfg = types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL)
+    else:
+        thinking_cfg = types.ThinkingConfig(thinking_budget=0)
+
+    try:
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                temperature=0.4,
+                max_output_tokens=1024,
+                thinking_config=thinking_cfg,
+            ),
+            contents=prompt,
+        )
+        if response.text:
+            return response.text.strip()
+    except Exception as e:
+        # Jika model menolak parameter thinking_config (400 INVALID_ARGUMENT), retry tanpa thinking_config
+        err_msg = str(e)
+        if "INVALID_ARGUMENT" in err_msg or "400" in err_msg:
+            logger.info("  Thinking config khusus tidak didukung model, retry tanpa thinking_config...")
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    temperature=0.4,
+                    max_output_tokens=1024,
+                ),
+                contents=prompt,
+            )
+            if response.text:
+                return response.text.strip()
+        raise
+
+    raise RuntimeError("Gemini AI Studio menghasilkan response kosong.")
 
 
 def _generate_with_vertex(model, prompt: str) -> str:
@@ -306,6 +335,9 @@ def generate_narasi(result, use_gemini: bool = True) -> dict:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import sys
+    if sys.platform == "win32":
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     from rich import print as rprint
     from rich.panel import Panel
     from engine.vulnerability import calculate_from_cache_or_ee

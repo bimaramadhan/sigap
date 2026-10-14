@@ -3,6 +3,9 @@ test_narrator.py
 Test narrator.py — cek apakah Gemini AI Studio atau template jalan.
 """
 import sys, os
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, os.path.dirname(__file__))
 
 from engine.narrator import _init_google_ai_studio, _init_vertex_ai, generate_narasi

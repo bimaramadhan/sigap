@@ -8,7 +8,6 @@ import MapView from './components/MapView.jsx'
 import AlertPanel from './components/AlertPanel.jsx'
 import VulnerabilityCard from './components/VulnerabilityCard.jsx'
 import NarasiPanel from './components/NarasiPanel.jsx'
-import FloodReportPanel from './components/FloodReportPanel.jsx'
 import ReportPage from './components/ReportPage.jsx'
 import GoogleAuthModal from './components/GoogleAuthModal.jsx'
 import { useAnalysis } from './hooks/useAnalysis.js'
@@ -50,45 +49,7 @@ function SectionTitle({ icon: Icon, title, badge }) {
   )
 }
 
-// ── Right sidebar tab bar ─────────────────────────────────────────────────────
-function RightTabBar({ active, onChange, isDark, reportCount }) {
-  const tabs = [
-    { id: 'briefing', label: 'AI Briefing', icon: MessageSquare },
-    { id: 'laporan', label: 'Laporan Lapangan', icon: Droplets, badge: reportCount },
-  ]
-  return (
-    <div className={clsx(
-      'flex border-b shrink-0',
-      isDark ? 'border-gray-800' : 'border-gray-200'
-    )}>
-      {tabs.map(({ id, label, icon: Icon, badge }) => (
-        <button
-          key={id}
-          onClick={() => onChange(id)}
-          className={clsx(
-            'flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium',
-            'transition-colors border-b-2',
-            active === id
-              ? isDark
-                ? 'text-blue-400 border-blue-500'
-                : 'text-blue-600 border-blue-500'
-              : isDark
-                ? 'text-gray-500 border-transparent hover:text-gray-300'
-                : 'text-gray-400 border-transparent hover:text-gray-600'
-          )}
-        >
-          <Icon size={13} />
-          {label}
-          {badge > 0 && (
-            <span className="bg-blue-500/20 text-blue-400 text-xs px-1.5 rounded-full font-bold">
-              {badge}
-            </span>
-          )}
-        </button>
-      ))}
-    </div>
-  )
-}
+
 
 // ── Toast notification ────────────────────────────────────────────────────────
 function Toast({ message, type, isDark }) {
@@ -115,7 +76,6 @@ export default function App() {
   const [cities, setCities] = useState(MOCK_CITIES)
   const [cityMeta, setCityMeta] = useState(MOCK_CITIES[0])
   const [activeTab, setActiveTab] = useState('map')
-  const [rightTab, setRightTab] = useState('briefing')
   const [toast, setToast] = useState(null)
   const { theme } = useTheme()
   const isDark = theme === 'dark'
@@ -368,56 +328,30 @@ export default function App() {
             <aside className={clsx(
               'w-96 shrink-0 border-l flex-col overflow-hidden',
               sidebarBg, border,
-              // Mobile: tampil saat tab narasi atau laporan
-              (activeTab === 'narasi' || activeTab === 'laporan') ? 'flex' : 'hidden',
+              // Mobile: tampil saat tab narasi
+              activeTab === 'narasi' ? 'flex' : 'hidden',
               'lg:flex'
             )}>
-              {/* Header sidebar dengan tombol buka halaman penuh */}
-              <div className="flex items-center justify-between border-b shrink-0 pr-3"
-                style={{ borderColor: isDark ? '#1f2937' : '#e5e7eb' }}>
-                <div className="flex-1">
-                  <RightTabBar
-                    active={activeTab === 'laporan' ? 'laporan' : rightTab}
-                    onChange={(t) => {
-                      setRightTab(t)
-                      // Sync mobile tab juga
-                      if (t === 'laporan') setActiveTab('laporan')
-                      else setActiveTab('narasi')
-                    }}
-                    isDark={isDark}
-                    reportCount={reports.length}
-                  />
-                </div>
+              {/* Header sidebar */}
+              <div className={clsx(
+                'flex items-center gap-2 px-4 py-2.5 border-b shrink-0',
+                isDark ? 'border-gray-800' : 'border-gray-200'
+              )}>
+                <MessageSquare size={13} className="text-blue-500" />
+                <span className={clsx(
+                  'text-xs font-semibold uppercase tracking-wider',
+                  isDark ? 'text-gray-300' : 'text-gray-600'
+                )}>AI Briefing</span>
               </div>
 
               {/* Content */}
               <div className="flex-1 overflow-y-auto p-4">
-                {(activeTab === 'laporan' || rightTab === 'laporan') && activeTab !== 'narasi' ? (
-                  // Panel Laporan Lapangan
-                  <>
-                    <SectionTitle icon={Droplets} title="Laporan Lapangan BPBD" />
-                    <FloodReportPanel
-                      city={selectedCity}
-                      reports={reports}
-                      isDark={isDark}
-                      onClear={() => {
-                        clearReports()
-                        showToast('Laporan dihapus.', 'success')
-                      }}
-                    />
-                  </>
-                ) : (
-                  // Panel AI Briefing
-                  <>
-                    <SectionTitle icon={MessageSquare} title="AI Briefing" />
-                    <NarasiPanel
-                      narasi={narasi}
-                      vulnerability={vulnerability}
-                      loading={loading.narasi}
-                      isDark={isDark}
-                    />
-                  </>
-                )}
+                <NarasiPanel
+                  narasi={narasi}
+                  vulnerability={vulnerability}
+                  loading={loading.narasi}
+                  isDark={isDark}
+                />
               </div>
             </aside>
 

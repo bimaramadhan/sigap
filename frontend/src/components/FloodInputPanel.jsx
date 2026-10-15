@@ -29,43 +29,48 @@ import {
 import clsx from 'clsx'
 import GoogleIcon from './GoogleIcon.jsx'
 import { useAuth } from '../lib/AuthContext.jsx'
+import { useLanguage } from '../lib/LanguageContext.jsx'
 
 const FLOOD_LEVELS = [
   {
-    id:     'normal',
-    label:  '🟢 Normal',
-    desc:   'Tidak ada genangan yang dilaporkan',
-    boost:  0,
+    id:       'normal',
+    emoji:    '🟢',
+    labelKey: 'flood.lvlNormal',
+    descKey:  'flood.descNormal',
+    boost:    0,
     bg:     { dark: 'bg-green-500/15 border-green-500/50',   light: 'bg-green-50 border-green-300' },
     text:   { dark: 'text-green-300', light: 'text-green-700' },
     active: { dark: 'bg-green-500/30 border-green-400 ring-2 ring-green-400/50',
               light: 'bg-green-100 border-green-500 ring-2 ring-green-300' },
   },
   {
-    id:     'waspada',
-    label:  '🟡 Waspada',
-    desc:   'Genangan mulai terjadi di desa ini',
-    boost:  8,
+    id:       'waspada',
+    emoji:    '🟡',
+    labelKey: 'flood.lvlWaspada',
+    descKey:  'flood.descWaspada',
+    boost:    8,
     bg:     { dark: 'bg-yellow-500/15 border-yellow-500/50',   light: 'bg-yellow-50 border-yellow-300' },
     text:   { dark: 'text-yellow-300', light: 'text-yellow-700' },
     active: { dark: 'bg-yellow-500/30 border-yellow-400 ring-2 ring-yellow-400/50',
               light: 'bg-yellow-100 border-yellow-500 ring-2 ring-yellow-300' },
   },
   {
-    id:     'siaga',
-    label:  '🟠 Siaga',
-    desc:   'Genangan mengganggu aktivitas warga',
-    boost:  15,
+    id:       'siaga',
+    emoji:    '🟠',
+    labelKey: 'flood.lvlSiaga',
+    descKey:  'flood.descSiaga',
+    boost:    15,
     bg:     { dark: 'bg-orange-500/15 border-orange-500/50',   light: 'bg-orange-50 border-orange-300' },
     text:   { dark: 'text-orange-300', light: 'text-orange-700' },
     active: { dark: 'bg-orange-500/30 border-orange-400 ring-2 ring-orange-400/50',
               light: 'bg-orange-100 border-orange-500 ring-2 ring-orange-300' },
   },
   {
-    id:     'awas',
-    label:  '🔴 Awas',
-    desc:   'Genangan membahayakan dan perlu evakuasi',
-    boost:  25,
+    id:       'awas',
+    emoji:    '🔴',
+    labelKey: 'flood.lvlAwas',
+    descKey:  'flood.descAwas',
+    boost:    25,
     bg:     { dark: 'bg-red-500/15 border-red-500/50',   light: 'bg-red-50 border-red-300' },
     text:   { dark: 'text-red-300', light: 'text-red-700' },
     active: { dark: 'bg-red-500/30 border-red-400 ring-2 ring-red-400/50',
@@ -74,6 +79,7 @@ const FLOOD_LEVELS = [
 ]
 
 function LevelButton({ level, selected, onSelect, isDark, disabled }) {
+  const { t } = useLanguage()
   const isActive = selected === level.id
   const variant  = isDark ? 'dark' : 'light'
 
@@ -88,13 +94,13 @@ function LevelButton({ level, selected, onSelect, isDark, disabled }) {
         isActive ? level.active[variant] : level.bg[variant]
       )}
     >
-      <span className="text-base leading-none">{level.label.split(' ')[0]}</span>
+      <span className="text-base leading-none">{level.emoji}</span>
       <span className={clsx('text-xs font-bold', level.text[variant])}>
-        {level.label.split(' ')[1]}
+        {t(level.labelKey)}
       </span>
       {isActive && (
         <span className={clsx('text-xs font-semibold', level.text[variant])}>
-          +{level.boost} poin
+          +{level.boost} {t('flood.pointSuffix')}
         </span>
       )}
     </button>
@@ -134,10 +140,10 @@ function groupLabel(group, showKota) {
 }
 
 function ReportCard({ report, isDark }) {
+  const { t, fmtTime } = useLanguage()
   const levelId = report.flood_level || report.river_level || 'normal'
   const level   = FLOOD_LEVELS.find(l => l.id === levelId) || FLOOD_LEVELS[0]
-  const timeStr = new Date(report.reported_at).toLocaleTimeString('id-ID',
-    { hour: '2-digit', minute: '2-digit' })
+  const timeStr = fmtTime(report.reported_at)
   const variant = isDark ? 'dark' : 'light'
 
   return (
@@ -147,16 +153,16 @@ function ReportCard({ report, isDark }) {
     )}>
       <div className="flex items-center justify-between">
         <span className={clsx('font-semibold', level.text[variant])}>
-          {level.label}
+          {level.emoji} {t(level.labelKey)}
         </span>
         <span className={isDark ? 'text-gray-500' : 'text-gray-400'}>{timeStr}</span>
       </div>
       <div className={clsx('font-medium', isDark ? 'text-gray-200' : 'text-gray-800')}>
-        {report.desa_name ? `Desa/Kel. ${report.desa_name}` : (report.river_name || 'Desa/Kelurahan')}
+        {report.desa_name ? `${t('flood.desaPrefix')}${report.desa_name}` : (report.river_name || t('flood.desaFallback'))}
       </div>
       {report.kecamatan && (
         <div className={isDark ? 'text-gray-400' : 'text-gray-500'}>
-          Kecamatan {report.kecamatan}
+          {t('flood.kecPrefix')}{report.kecamatan}
         </div>
       )}
 
@@ -167,9 +173,9 @@ function ReportCard({ report, isDark }) {
           isDark ? 'text-blue-300' : 'text-blue-700'
         )}>
           <ShieldCheck size={12} className="text-blue-500 shrink-0" />
-          <span className="font-semibold truncate">Oleh: {report.reporter}</span>
+          <span className="font-semibold truncate">{t('flood.byPrefix')}{report.reporter}</span>
           <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-blue-500/20 text-blue-400 font-medium">
-            Terverifikasi
+            {t('flood.verified')}
           </span>
         </div>
       )}
@@ -180,7 +186,7 @@ function ReportCard({ report, isDark }) {
         </div>
       )}
       <div className={clsx('font-medium', level.text[variant])}>
-        +{report.boost_score} poin ke skor risiko
+        +{report.boost_score} {t('flood.boostToRisk')}
       </div>
     </div>
   )
@@ -197,6 +203,7 @@ export default function FloodInputPanel({
   onClear,
 }) {
   const { user, isAuthenticated, openAuthModal, logout } = useAuth()
+  const { t } = useLanguage()
 
   const [reporter,   setReporter]   = useState(user?.name || '')
   const [desaKode,   setDesaKode]   = useState('')
@@ -276,7 +283,7 @@ export default function FloodInputPanel({
     }
 
     if (!desaKode) {
-      setError('Desa atau kelurahan wajib dipilih')
+      setError(t('flood.villageRequired'))
       return
     }
     setError('')
@@ -297,7 +304,7 @@ export default function FloodInputPanel({
       setSubmitted(true)
       setTimeout(() => setSubmitted(false), 3000)
     } catch {
-      setError('Gagal mengirim laporan. Coba lagi.')
+      setError(t('flood.submitFailed'))
     } finally {
       setSubmitting(false)
     }
@@ -334,13 +341,13 @@ export default function FloodInputPanel({
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm font-bold">Login Petugas Diperlukan</h3>
+                <h3 className="text-sm font-bold">{t('flood.loginRequired')}</h3>
                 <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                  🔒 Khusus Petugas BPBD
+                  {t('flood.officerOnly')}
                 </span>
               </div>
               <p className={clsx('text-xs mt-1 leading-relaxed', isDark ? 'text-gray-300' : 'text-gray-600')}>
-                Sesuai SOP BNPB No.2/2024, verifikasi akun Google diperlukan agar hanya petugas resmi yang dapat mengisi dan mengirim laporan validasi lapangan.
+                {t('flood.loginBannerBody')}
               </p>
             </div>
           </div>
@@ -351,7 +358,7 @@ export default function FloodInputPanel({
             className="w-full flex items-center justify-center gap-2.5 py-2.5 px-4 rounded-xl bg-white hover:bg-gray-50 text-gray-800 font-semibold text-xs border border-gray-300 shadow-sm transition-all hover:shadow hover:scale-[1.005] active:scale-[0.99] cursor-pointer"
           >
             <GoogleIcon size={16} />
-            <span>Login with Google untuk Mengisi Form</span>
+            <span>{t('flood.loginToFill')}</span>
           </button>
         </div>
       ) : (
@@ -375,7 +382,7 @@ export default function FloodInputPanel({
                   {user.name?.charAt(0) || 'P'}
                 </div>
               )}
-              <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-green-500 border-2 border-white dark:border-gray-900" title="Aktif" />
+              <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-green-500 border-2 border-white dark:border-gray-900" title={t('flood.active')} />
             </div>
 
             <div className="min-w-0">
@@ -386,7 +393,7 @@ export default function FloodInputPanel({
                 <BadgeCheck size={15} className="text-blue-500 shrink-0" />
               </div>
               <p className={clsx('text-[11px] truncate', isDark ? 'text-blue-300/80' : 'text-blue-700/80')}>
-                {user.role || 'Petugas Lapangan BPBD'} • {user.email}
+                {user.role || t('flood.roleFallback')} • {user.email}
               </p>
             </div>
           </div>
@@ -394,7 +401,7 @@ export default function FloodInputPanel({
           <button
             type="button"
             onClick={logout}
-            title="Keluar / Ganti Akun"
+            title={t('flood.logoutSwitch')}
             className={clsx(
               'flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[11px] font-medium transition-all shrink-0 cursor-pointer',
               isDark
@@ -403,7 +410,7 @@ export default function FloodInputPanel({
             )}
           >
             <LogOut size={12} />
-            <span className="hidden sm:inline">Keluar</span>
+            <span className="hidden sm:inline">{t('flood.logout')}</span>
           </button>
         </div>
       )}
@@ -413,21 +420,21 @@ export default function FloodInputPanel({
         {/* Nama Petugas Field */}
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <label className={labelCls}>Nama Petugas</label>
+            <label className={labelCls}>{t('flood.officerName')}</label>
             {isAuthenticated ? (
               <span className="text-[10px] flex items-center gap-1 text-green-500 font-medium">
-                <BadgeCheck size={12} /> Google Verified
+                <BadgeCheck size={12} /> {t('flood.googleVerified')}
               </span>
             ) : (
               <span className="text-[10px] text-amber-500 font-medium flex items-center gap-1">
-                <Lock size={10} /> Perlu Login
+                <Lock size={10} /> {t('flood.needLogin')}
               </span>
             )}
           </div>
           <div className="relative">
             <input
               type="text"
-              placeholder={isAuthenticated ? user?.name : 'Login with Google untuk mengisi'}
+              placeholder={isAuthenticated ? user?.name : t('flood.loginToFillName')}
               value={reporter}
               onChange={e => setReporter(e.target.value)}
               disabled={!isAuthenticated}
@@ -439,9 +446,9 @@ export default function FloodInputPanel({
         {/* Pilihan Desa — Searchable Combobox */}
         <div>
           <label className={labelCls}>
-            Desa / Kelurahan *
+            {t('flood.villageLabel')}
             {cityName ? <span className="text-blue-500 font-semibold ml-1">({cityName})</span> : ''}
-            {hasVillages && <span className="opacity-60 font-normal ml-1">({totalVillages} desa, {villages.length} kecamatan)</span>}
+            {hasVillages && <span className="opacity-60 font-normal ml-1">{t('flood.villageCountSuffix', { villages: totalVillages, kec: villages.length })}</span>}
           </label>
 
           <div ref={desaComboRef} className="relative">
@@ -467,10 +474,10 @@ export default function FloodInputPanel({
                 {desaKode && selectedVillage
                   ? selectedVillage.nama
                   : !isAuthenticated
-                    ? '🔒 Login dengan Google untuk memilih desa...'
+                    ? t('flood.loginToPickVillage')
                     : hasVillages
-                      ? `Pilih desa / kelurahan...`
-                      : loading ? 'Memuat data desa...' : 'Belum ada data desa untuk wilayah ini'
+                      ? t('flood.pickVillage')
+                      : loading ? t('flood.loadingVillages') : t('flood.noVillages')
                 }
               </span>
               <svg
@@ -500,7 +507,7 @@ export default function FloodInputPanel({
                     type="text"
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
-                    placeholder="Cari nama desa atau kecamatan..."
+                    placeholder={t('flood.searchVillage')}
                     className={clsx(
                       'w-full text-xs px-2.5 py-1.5 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition',
                       isDark
@@ -554,7 +561,7 @@ export default function FloodInputPanel({
                     </div>
                   )) : (
                     <p className={clsx('px-4 py-4 text-xs text-center', isDark ? 'text-gray-500' : 'text-gray-400')}>
-                      Tidak ditemukan
+                      {t('flood.notFound')}
                     </p>
                   )}
                 </div>
@@ -564,14 +571,14 @@ export default function FloodInputPanel({
 
           {selectedVillage && (
             <p className={clsx('text-xs mt-1.5', isDark ? 'text-gray-400' : 'text-gray-500')}>
-              Kecamatan: <span className="font-semibold">{selectedVillage.kecamatan}</span>
+              {t('flood.kecLabel')}<span className="font-semibold">{selectedVillage.kecamatan}</span>
             </p>
           )}
         </div>
 
         {/* Status Banjir */}
         <div>
-          <label className={labelCls}>Status Banjir *</label>
+          <label className={labelCls}>{t('flood.floodStatus')}</label>
           <div className="grid grid-cols-4 gap-1.5">
             {FLOOD_LEVELS.map(level => (
               <LevelButton
@@ -586,17 +593,17 @@ export default function FloodInputPanel({
           </div>
           {floodLevel !== 'normal' && (
             <p className={clsx('text-xs mt-1.5', isDark ? 'text-gray-400' : 'text-gray-500')}>
-              {selectedLevel.desc} — boost <span className="font-bold text-orange-400">+{selectedLevel.boost} poin</span>
+              {t(selectedLevel.descKey)} — {t('flood.boostWord')} <span className="font-bold text-orange-400">+{selectedLevel.boost} {t('flood.pointSuffix')}</span>
             </p>
           )}
         </div>
 
         {/* Catatan Tambahan */}
         <div>
-          <label className={labelCls}>Catatan Tambahan</label>
+          <label className={labelCls}>{t('flood.notesLabel')}</label>
           <textarea
             rows={2}
-            placeholder={isAuthenticated ? "Kondisi lapangan, jalur terputus, dll." : "Login Google untuk menambahkan catatan..."}
+            placeholder={isAuthenticated ? t('flood.notesPlaceholder') : t('flood.notesLoginPlaceholder')}
             value={notes}
             onChange={e => setNotes(e.target.value)}
             disabled={!isAuthenticated}
@@ -618,8 +625,11 @@ export default function FloodInputPanel({
               : 'bg-blue-50 border-blue-200 text-blue-700'
           )}>
             <Droplets size={12} className="inline mr-1" />
-            Laporan ini menambah <strong>+{selectedLevel.boost} poin</strong> ke skor {cityName || city}
-            {selectedVillage ? ` dan kecamatan ${selectedVillage.kecamatan}` : ''}
+            {t('flood.previewBanner', {
+              boost: selectedLevel.boost,
+              city: cityName || city,
+              kec: selectedVillage ? selectedVillage.kecamatan : '-',
+            })}
           </div>
         )}
 
@@ -631,7 +641,7 @@ export default function FloodInputPanel({
             className="w-full flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl font-bold text-sm bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-500/25 active:scale-[0.99] transition-all cursor-pointer"
           >
             <GoogleIcon size={18} />
-            <span>Login with Google untuk Submit Laporan</span>
+            <span>{t('flood.submitLogin')}</span>
           </button>
         ) : (
           <button
@@ -648,17 +658,17 @@ export default function FloodInputPanel({
             {submitted ? (
               <>
                 <CheckCircle2 size={15} />
-                Laporan Terkirim!
+                {t('flood.submitDone')}
               </>
             ) : submitting ? (
               <>
                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Mengirim Laporan...
+                {t('flood.submitting')}
               </>
             ) : (
               <>
                 <Send size={15} />
-                Kirim Laporan Lapangan ({user.name.split(' ')[0]})
+                {t('flood.submitDefault')} ({user.name.split(' ')[0]})
               </>
             )}
           </button>
@@ -673,7 +683,7 @@ export default function FloodInputPanel({
             <p className={clsx('text-xs font-semibold uppercase tracking-wider',
               isDark ? 'text-gray-500' : 'text-gray-400'
             )}>
-              Laporan Terbaru ({reports.length})
+              {t('flood.recentReports')} ({reports.length})
             </p>
             <button
               type="button"
@@ -686,7 +696,7 @@ export default function FloodInputPanel({
               )}
             >
               <RotateCcw size={11} />
-              Reset
+              {t('flood.reset')}
             </button>
           </div>
           <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
@@ -703,9 +713,9 @@ export default function FloodInputPanel({
           isDark ? 'text-gray-600' : 'text-gray-400'
         )}>
           <Droplets size={22} className="mx-auto mb-2 opacity-30" />
-          <p>Belum ada laporan lapangan</p>
+          <p>{t('flood.noReports')}</p>
           <p className="mt-0.5 opacity-60">
-            Submit laporan untuk update skor secara real-time
+            {t('flood.noReportsSub')}
           </p>
         </div>
       )}

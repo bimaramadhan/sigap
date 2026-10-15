@@ -10,24 +10,26 @@
 
 import { Cloud, Droplets, TrendingUp, RefreshCw } from 'lucide-react'
 import clsx from 'clsx'
+import { useLanguage } from '../lib/LanguageContext.jsx'
 
 const RISK_CONFIG = {
-  extreme: { bg: 'bg-red-500/20 border-red-500/40',    text: 'text-red-300',    badgeBg: 'bg-red-500/30',    label: 'EKSTREM'  },
-  high:    { bg: 'bg-orange-500/15 border-orange-500/35', text: 'text-orange-300', badgeBg: 'bg-orange-500/25', label: 'TINGGI'   },
-  medium:  { bg: 'bg-yellow-500/15 border-yellow-500/35', text: 'text-yellow-300', badgeBg: 'bg-yellow-500/25', label: 'SEDANG'   },
-  low:     { bg: 'bg-blue-500/10 border-blue-500/25',   text: 'text-blue-300',   badgeBg: 'bg-blue-500/20',   label: 'RINGAN'   },
-  none:    { bg: 'bg-gray-800/50 border-gray-700/50',   text: 'text-gray-400',   badgeBg: 'bg-gray-700/50',   label: 'CERAH'    },
+  extreme: { bg: 'bg-red-500/20 border-red-500/40',    text: 'text-red-300',    badgeBg: 'bg-red-500/30',    labelKey: 'weather.extreme' },
+  high:    { bg: 'bg-orange-500/15 border-orange-500/35', text: 'text-orange-300', badgeBg: 'bg-orange-500/25', labelKey: 'weather.high'    },
+  medium:  { bg: 'bg-yellow-500/15 border-yellow-500/35', text: 'text-yellow-300', badgeBg: 'bg-yellow-500/25', labelKey: 'weather.medium'  },
+  low:     { bg: 'bg-blue-500/10 border-blue-500/25',   text: 'text-blue-300',   badgeBg: 'bg-blue-500/20',   labelKey: 'weather.low'     },
+  none:    { bg: 'bg-gray-800/50 border-gray-700/50',   text: 'text-gray-400',   badgeBg: 'bg-gray-700/50',   labelKey: 'weather.none'    },
 }
 
 const RISK_CONFIG_LIGHT = {
-  extreme: { bg: 'bg-red-50 border-red-200',      text: 'text-red-700',    badgeBg: 'bg-red-100',    label: 'EKSTREM' },
-  high:    { bg: 'bg-orange-50 border-orange-200', text: 'text-orange-700', badgeBg: 'bg-orange-100', label: 'TINGGI'  },
-  medium:  { bg: 'bg-yellow-50 border-yellow-200', text: 'text-yellow-700', badgeBg: 'bg-yellow-100', label: 'SEDANG'  },
-  low:     { bg: 'bg-blue-50 border-blue-200',     text: 'text-blue-700',   badgeBg: 'bg-blue-100',   label: 'RINGAN'  },
-  none:    { bg: 'bg-gray-50 border-gray-200',     text: 'text-gray-500',   badgeBg: 'bg-gray-100',   label: 'CERAH'   },
+  extreme: { bg: 'bg-red-50 border-red-200',      text: 'text-red-700',    badgeBg: 'bg-red-100',    labelKey: 'weather.extreme' },
+  high:    { bg: 'bg-orange-50 border-orange-200', text: 'text-orange-700', badgeBg: 'bg-orange-100', labelKey: 'weather.high'    },
+  medium:  { bg: 'bg-yellow-50 border-yellow-200', text: 'text-yellow-700', badgeBg: 'bg-yellow-100', labelKey: 'weather.medium'  },
+  low:     { bg: 'bg-blue-50 border-blue-200',     text: 'text-blue-700',   badgeBg: 'bg-blue-100',   labelKey: 'weather.low'     },
+  none:    { bg: 'bg-gray-50 border-gray-200',     text: 'text-gray-500',   badgeBg: 'bg-gray-100',   labelKey: 'weather.none'    },
 }
 
 export default function WeatherBar({ data, loading, isDark }) {
+  const { t, fmtTime } = useLanguage()
   const configs = isDark ? RISK_CONFIG : RISK_CONFIG_LIGHT
   const risk    = data?.weather_risk ?? 'none'
   const cfg     = configs[risk] ?? configs.none
@@ -52,12 +54,10 @@ export default function WeatherBar({ data, loading, isDark }) {
 
   const rainfall    = data.rainfall_12h_mm ?? 0
   const boost       = data.boost_score ?? 0
-  const desc        = data.worst_weather_desc ?? 'Tidak diketahui'
+  const desc        = data.worst_weather_desc ?? t('weather.unknown')
   const emoji       = data.worst_weather_emoji ?? '🌡️'
   const kecCount    = data.kecamatan_count ?? 0
-  const fetchedAt   = data.fetched_at
-    ? new Date(data.fetched_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
-    : ''
+  const fetchedAt   = data.fetched_at ? fmtTime(data.fetched_at) : ''
 
   return (
     <div className={clsx(
@@ -78,7 +78,7 @@ export default function WeatherBar({ data, loading, isDark }) {
       <div className="flex items-center gap-1.5">
         <Droplets size={12} className={cfg.text} />
         <span className={cfg.text}>
-          {rainfall.toFixed(1)} mm/12jam
+          {rainfall.toFixed(1)} {t('weather.rainUnit')}
         </span>
       </div>
 
@@ -87,7 +87,7 @@ export default function WeatherBar({ data, loading, isDark }) {
         'px-2 py-0.5 rounded-full font-bold tracking-wide',
         cfg.badgeBg, cfg.text
       )}>
-        {cfg.label}
+        {t(cfg.labelKey)}
       </span>
 
       {/* Score boost */}
@@ -95,7 +95,7 @@ export default function WeatherBar({ data, loading, isDark }) {
         <div className="flex items-center gap-1">
           <TrendingUp size={12} className={cfg.text} />
           <span className={clsx('font-semibold', cfg.text)}>
-            +{boost} poin ke skor
+            +{boost} {t('weather.boostSuffix')}
           </span>
         </div>
       )}
@@ -108,7 +108,7 @@ export default function WeatherBar({ data, loading, isDark }) {
         {kecCount > 0 && (
           <span className="flex items-center gap-1">
             <Cloud size={11} />
-            {kecCount} kecamatan
+            {kecCount} {t('weather.kecamatan')}
           </span>
         )}
         {fetchedAt && (
@@ -117,7 +117,7 @@ export default function WeatherBar({ data, loading, isDark }) {
             {fetchedAt}
           </span>
         )}
-        <span>BMKG Prakiraan</span>
+        <span>{t('weather.source')}</span>
       </div>
     </div>
   )

@@ -15,6 +15,7 @@ import { useFloodReports } from './hooks/useFloodReports.js'
 import { MOCK_CITIES } from './lib/mockData.js'
 import { getCities, getCity } from './lib/api.js'
 import { useTheme } from './lib/ThemeContext.jsx'
+import { useLanguage } from './lib/LanguageContext.jsx'
 
 // Mobile tabs — 5 tabs sekarang
 const TABS = [
@@ -78,6 +79,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('map')
   const [toast, setToast] = useState(null)
   const { theme } = useTheme()
+  const { t, fmtNum, lang: uiLang } = useLanguage()
   const isDark = theme === 'dark'
   const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 
@@ -145,11 +147,11 @@ export default function App() {
 
   // ── Analysis hook ──────────────────────────────────────────────────────────
   const { alerts, weather, vulnerability, narasi, loading, isLoading, lastUpdated, refresh }
-    = useAnalysis(activeCity)
+    = useAnalysis(activeCity, uiLang)
 
   // ── Flood reports hook ─────────────────────────────────────────────────────
   const onReportSuccess = useCallback(() => {
-    showToast('Laporan terkirim! Skor risiko diperbarui.', 'success')
+    showToast(t('toast.reportSent'), 'success')
     // Delay sedikit supaya backend sempat proses sebelum refresh
     setTimeout(() => refresh(), 300)
   }, [refresh])
@@ -167,7 +169,7 @@ export default function App() {
     try {
       await submitReport(data)
     } catch {
-      showToast('Gagal mengirim laporan.', 'error')
+      showToast(t('toast.reportFailed'), 'error')
     }
   }
 
@@ -210,7 +212,7 @@ export default function App() {
           onSubmitReport={handleSubmitReport}
           onClearReports={() => {
             clearReports()
-            showToast('Laporan dihapus.', 'success')
+            showToast(t('toast.reportCleared'), 'success')
           }}
           onNavigate={navigate}
         />
@@ -234,7 +236,7 @@ export default function App() {
                 )}
               >
                 <Icon size={15} />
-                {label}
+                {t(`tabs.${id}`)}
               </button>
             ))}
           </div>
@@ -252,12 +254,12 @@ export default function App() {
             )}>
               <div className="p-4 space-y-5">
                 <section>
-                  <SectionTitle icon={Bell} title="BMKG Alerts" badge={alerts?.flood_alerts} />
+                  <SectionTitle icon={Bell} title={t('section.bmkgAlerts')} badge={alerts?.flood_alerts} />
                   <AlertPanel data={alerts} loading={loading.alerts} isDark={isDark} />
                 </section>
 
                 <section className={clsx('border-t pt-5', border)}>
-                  <SectionTitle icon={BarChart2} title="Vulnerability Score" />
+                  <SectionTitle icon={BarChart2} title={t('section.vulnScore')} />
                   <VulnerabilityCard
                     data={vulnerability}
                     loading={loading.vulnerability}
@@ -283,7 +285,7 @@ export default function App() {
                   stripBg, border
                 )}>
                   <div className="flex items-center gap-2">
-                    <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>Status:</span>
+                    <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>{t('status.status')}</span>
                     <span className={clsx('font-bold',
                       vulnerability.score >= 75 ? 'text-red-500'
                         : vulnerability.score >= 50 ? 'text-orange-500'
@@ -295,16 +297,16 @@ export default function App() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>Skor:</span>
+                    <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>{t('status.score')}</span>
                     <span className={clsx('font-bold', isDark ? 'text-white' : 'text-gray-900')}>
                       {vulnerability.score}/100
                     </span>
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>Est. terdampak:</span>
+                    <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>{t('status.affected')}</span>
                     <span className={clsx('font-bold', isDark ? 'text-white' : 'text-gray-900')}>
-                      {vulnerability.resource_needs?.estimated_affected?.toLocaleString('id-ID')} jiwa
+                      {fmtNum(vulnerability.resource_needs?.estimated_affected)} {t('status.people')}
                     </span>
                   </div>
 
@@ -313,12 +315,12 @@ export default function App() {
                     <div className="flex items-center gap-1 bg-blue-500/15 border border-blue-500/30
                                 text-blue-400 text-xs px-2 py-0.5 rounded-full">
                       <Droplets size={11} />
-                      {reports.length} laporan lapangan
+                      {reports.length} {t('status.fieldReports')}
                     </div>
                   )}
 
                   {vulnerability.is_sample_data && (
-                    <span className="ml-auto text-yellow-500/60 text-xs">⚠️ Sample data</span>
+                    <span className="ml-auto text-yellow-500/60 text-xs">{t('status.sampleData')}</span>
                   )}
                 </div>
               )}
@@ -341,7 +343,7 @@ export default function App() {
                 <span className={clsx(
                   'text-xs font-semibold uppercase tracking-wider',
                   isDark ? 'text-gray-300' : 'text-gray-600'
-                )}>AI Briefing</span>
+                )}>{t('section.aiBriefing')}</span>
               </div>
 
               {/* Content */}

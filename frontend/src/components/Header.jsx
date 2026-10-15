@@ -1,7 +1,8 @@
-import { RefreshCw, Wifi, WifiOff, Clock, Sun, Moon, Map, FileText, Search, BadgeCheck, LogOut } from 'lucide-react'
+import { RefreshCw, Wifi, WifiOff, Clock, Sun, Moon, Map, FileText, Search, BadgeCheck, LogOut, Languages } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import { useTheme } from '../lib/ThemeContext.jsx'
+import { useLanguage } from '../lib/LanguageContext.jsx'
 import { useAuth } from '../lib/AuthContext.jsx'
 import GoogleIcon from './GoogleIcon.jsx'
 
@@ -11,6 +12,7 @@ export default function Header({
   currentPath = '/', onNavigate = () => { },
 }) {
   const { theme, toggleTheme } = useTheme()
+  const { lang, toggleLang, t, fmtTime } = useLanguage()
   const { user, isAuthenticated, openAuthModal, logout } = useAuth()
   const isDark = theme === 'dark'
   const [query, setQuery] = useState('')
@@ -57,7 +59,7 @@ export default function Header({
         <div
           onClick={() => onNavigate('/')}
           className="flex items-center gap-2.5 cursor-pointer select-none"
-          title="Ke Dashboard"
+          title={t('header.toDashboard')}
         >
           <span className="text-2xl">🌊</span>
           <div>
@@ -67,7 +69,7 @@ export default function Header({
             <p className={clsx('text-xs leading-none mt-0.5',
               isDark ? 'text-gray-400' : 'text-gray-500'
             )}>
-              Sistem Penanggulangan Banjir
+              {t('header.tagline')}
             </p>
           </div>
         </div>
@@ -90,8 +92,8 @@ export default function Header({
             )}
           >
             <Map size={13} />
-            <span className="hidden sm:inline">Dashboard</span>
-            <span className="sm:hidden">Peta</span>
+            <span className="hidden sm:inline">{t('header.dashboard')}</span>
+            <span className="sm:hidden">{t('header.map')}</span>
           </button>
 
           <button
@@ -107,8 +109,8 @@ export default function Header({
             )}
           >
             <FileText size={13} />
-            <span className="hidden sm:inline">Laporan & Briefing</span>
-            <span className="sm:hidden">Laporan</span>
+            <span className="hidden sm:inline">{t('header.reportBriefing')}</span>
+            <span className="sm:hidden">{t('header.report')}</span>
           </button>
         </nav>
       </div>
@@ -116,7 +118,7 @@ export default function Header({
       {/* City selector */}
       <div className="flex items-center gap-2" ref={boxRef}>
         <label className={clsx('text-sm', isDark ? 'text-gray-400' : 'text-gray-600')}>
-          Kota:
+          {t('header.cityLabel')}
         </label>
         <div className="relative">
           <div className={clsx(
@@ -126,7 +128,7 @@ export default function Header({
             <Search size={13} className={isDark ? 'text-gray-500' : 'text-gray-400'} />
             <input
               value={open ? query : (selected ? `${selected.label}` : selectedCity)}
-              placeholder="Cari kab/kota"
+              placeholder={t('header.citySearch')}
               onFocus={() => { setOpen(true); setQuery('') }}
               onChange={e => { setQuery(e.target.value); setOpen(true) }}
               className={clsx(
@@ -142,7 +144,7 @@ export default function Header({
             )}>
               {matches.length === 0 && (
                 <p className={clsx('px-3 py-2 text-xs', isDark ? 'text-gray-500' : 'text-gray-400')}>
-                  Tidak ada kota yang cocok
+                  {t('header.cityNotFound')}
                 </p>
               )}
               {matches.map(city => (
@@ -180,7 +182,7 @@ export default function Header({
           <span className={clsx('text-xs',
             isLive ? 'text-green-500' : 'text-yellow-500'
           )}>
-            {isLive ? 'Live' : 'Mock'}
+            {isLive ? t('header.live') : t('header.mock')}
           </span>
         </div >
 
@@ -191,9 +193,7 @@ export default function Header({
               isDark ? 'text-gray-500' : 'text-gray-400'
             )}>
               <Clock size={11} />
-              {lastUpdated.toLocaleTimeString('id-ID', {
-                hour: '2-digit', minute: '2-digit', second: '2-digit'
-              })}
+              {fmtTime(lastUpdated)}
             </div>
           )
         }
@@ -219,7 +219,7 @@ export default function Header({
             <button
               type="button"
               onClick={logout}
-              title="Logout Petugas"
+              title={t('header.logoutOfficer')}
               className="text-gray-400 hover:text-red-400 p-0.5 transition-colors cursor-pointer"
             >
               <LogOut size={11} />
@@ -229,7 +229,7 @@ export default function Header({
           <button
             type="button"
             onClick={openAuthModal}
-            title="Login Petugas BPBD"
+            title={t('header.loginOfficerBPBD')}
             className={clsx(
               'flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-semibold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer',
               isDark
@@ -238,14 +238,29 @@ export default function Header({
             )}
           >
             <GoogleIcon size={13} />
-            <span className="hidden sm:inline">Login Petugas</span>
+            <span className="hidden sm:inline">{t('header.loginOfficer')}</span>
           </button>
         )}
+
+        {/* Language toggle (ID / EN) */}
+        <button
+          onClick={toggleLang}
+          title={lang === 'id' ? t('header.switchToEN') : t('header.switchToID')}
+          className={clsx(
+            'flex items-center gap-1 px-2 py-1.5 rounded-lg transition-colors text-xs font-bold',
+            isDark
+              ? 'bg-gray-800 hover:bg-gray-700 text-blue-300'
+              : 'bg-gray-100 hover:bg-gray-200 text-blue-600'
+          )}
+        >
+          <Languages size={14} />
+          <span>{lang === 'id' ? 'ID' : 'EN'}</span>
+        </button>
 
         {/* Dark/Light toggle */}
         <button
           onClick={toggleTheme}
-          title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+          title={isDark ? t('header.switchLight') : t('header.switchDark')}
           className={clsx(
             'p-1.5 rounded-lg transition-colors',
             isDark
@@ -267,7 +282,7 @@ export default function Header({
           )}
         >
           <RefreshCw size={13} className={clsx(isLoading && 'animate-spin')} />
-          Refresh
+          {t('header.refresh')}
         </button>
       </div >
     </header >

@@ -16,6 +16,7 @@ import clsx from 'clsx'
 import GoogleIcon from './GoogleIcon.jsx'
 import { useAuth, DEMO_OFFICERS } from '../lib/AuthContext.jsx'
 import { useTheme } from '../lib/ThemeContext.jsx'
+import { useLanguage } from '../lib/LanguageContext.jsx'
 
 export default function GoogleAuthModal() {
   const {
@@ -29,6 +30,7 @@ export default function GoogleAuthModal() {
   } = useAuth()
 
   const { theme } = useTheme()
+  const { t } = useLanguage()
   const isDark = theme === 'dark'
 
   const [mode, setMode] = useState('officers') // 'officers' | 'custom'
@@ -78,11 +80,11 @@ export default function GoogleAuthModal() {
   const handleCustomSubmit = (e) => {
     e.preventDefault()
     if (!customName.trim()) {
-      setCustomError('Nama lengkap wajib diisi')
+      setCustomError(t('auth.nameRequired'))
       return
     }
     if (!customEmail.trim() || !customEmail.includes('@')) {
-      setCustomError('Format email Google tidak valid')
+      setCustomError(t('auth.emailInvalid'))
       return
     }
     setCustomError('')
@@ -116,7 +118,7 @@ export default function GoogleAuthModal() {
               'absolute top-5 right-5 p-2 rounded-full transition-colors',
               isDark ? 'text-gray-400 hover:text-white hover:bg-gray-800' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'
             )}
-            aria-label="Tutup modal"
+            aria-label={t('auth.closeModal')}
           >
             <X size={18} />
           </button>
@@ -127,13 +129,13 @@ export default function GoogleAuthModal() {
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <h3 className="font-bold text-lg leading-snug">Masuk dengan Google</h3>
+                <h3 className="font-bold text-lg leading-snug">{t('auth.title')}</h3>
                 <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                  Petugas BPBD
+                  {t('auth.badge')}
                 </span>
               </div>
               <p className={clsx('text-xs mt-0.5', isDark ? 'text-gray-400' : 'text-gray-500')}>
-                Verifikasi identitas petugas untuk mengirim laporan lapangan
+                {t('auth.subtitle')}
               </p>
             </div>
           </div>
@@ -146,7 +148,7 @@ export default function GoogleAuthModal() {
           {hasGoogleClientId && (
             <div className="space-y-2">
               <p className={clsx('text-xs font-semibold uppercase tracking-wider', isDark ? 'text-gray-400' : 'text-gray-500')}>
-                Google Account Login
+                {t('auth.googleLogin')}
               </p>
               <div ref={googleBtnRef} className="flex justify-center" />
               <div className="relative my-3">
@@ -155,7 +157,7 @@ export default function GoogleAuthModal() {
                 </div>
                 <div className="relative flex justify-center text-xs">
                   <span className={clsx('px-2', isDark ? 'bg-gray-900 text-gray-500' : 'bg-white text-gray-400')}>
-                    atau pilih profil petugas
+                    {t('auth.orPickProfile')}
                   </span>
                 </div>
               </div>
@@ -178,7 +180,7 @@ export default function GoogleAuthModal() {
               )}
             >
               <ShieldCheck size={14} />
-              <span>Akun Petugas BPBD</span>
+              <span>{t('auth.tabOfficer')}</span>
             </button>
             <button
               type="button"
@@ -191,7 +193,7 @@ export default function GoogleAuthModal() {
               )}
             >
               <UserCheck size={14} />
-              <span>Akun Google Kustom</span>
+              <span>{t('auth.tabCustom')}</span>
             </button>
           </div>
 
@@ -199,7 +201,7 @@ export default function GoogleAuthModal() {
           {mode === 'officers' && (
             <div className="space-y-2.5">
               <p className={clsx('text-xs font-semibold uppercase tracking-wider', isDark ? 'text-gray-400' : 'text-gray-500')}>
-                Pilih Petugas Lapangan Terverifikasi:
+                {t('auth.pickOfficer')}
               </p>
 
               {DEMO_OFFICERS.map((officer) => (
@@ -250,16 +252,16 @@ export default function GoogleAuthModal() {
           {mode === 'custom' && (
             <form onSubmit={handleCustomSubmit} className="space-y-3.5">
               <p className={clsx('text-xs', isDark ? 'text-gray-400' : 'text-gray-500')}>
-                Masukkan data akun Google petugas Anda untuk simulasi login lapangan:
+                {t('auth.customIntro')}
               </p>
 
               <div>
                 <label className={clsx('block text-xs font-semibold mb-1', isDark ? 'text-gray-300' : 'text-gray-700')}>
-                  Nama Lengkap Petugas *
+                  {t('auth.fullName')}
                 </label>
                 <input
                   type="text"
-                  placeholder="Contoh: Hendra Pratama, S.T."
+                  placeholder={t('auth.namePlaceholder')}
                   value={customName}
                   onChange={(e) => setCustomName(e.target.value)}
                   className={clsx(
@@ -273,7 +275,7 @@ export default function GoogleAuthModal() {
 
               <div>
                 <label className={clsx('block text-xs font-semibold mb-1', isDark ? 'text-gray-300' : 'text-gray-700')}>
-                  Email Google (Gmail / Workspace) *
+                  {t('auth.emailLabel')}
                 </label>
                 <input
                   type="email"
@@ -299,7 +301,7 @@ export default function GoogleAuthModal() {
                 className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm transition-all shadow-md active:scale-[0.99]"
               >
                 <GoogleIcon size={16} />
-                <span>Masuk dengan Akun Ini</span>
+                <span>{t('auth.loginThisAccount')}</span>
               </button>
             </form>
           )}
@@ -311,7 +313,7 @@ export default function GoogleAuthModal() {
           )}>
             <ShieldCheck size={16} className="text-blue-500 shrink-0 mt-0.5" />
             <p className="leading-relaxed">
-              <strong>Kepatuhan Regulasi BNPB No.2/2024:</strong> Setiap laporan genangan lapangan diverifikasi identitas petugasnya guna menjamin keandalan data taktis kebencanaan.
+              <strong>{t('auth.compliance')}</strong> {t('auth.complianceBody')}
             </p>
           </div>
 
@@ -331,7 +333,7 @@ export default function GoogleAuthModal() {
               isDark ? 'text-gray-300' : 'text-gray-600'
             )}
           >
-            Batal
+            {t('auth.cancel')}
           </button>
         </div>
 

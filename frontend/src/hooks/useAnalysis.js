@@ -8,7 +8,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { getAlerts, getVulnerability, getNarasi, getWeather } from '../lib/api.js'
 
-export function useAnalysis(city) {
+export function useAnalysis(city, lang = 'id') {
   const [alerts,        setAlerts]        = useState(null)
   const [weather,       setWeather]       = useState(null)
   const [vulnerability, setVulnerability] = useState(null)
@@ -58,14 +58,14 @@ export function useAnalysis(city) {
   const fetchNarasi = useCallback(async (c) => {
     setLoading(p => ({ ...p, narasi: true }))
     try {
-      setNarasi(await getNarasi(c))
+      setNarasi(await getNarasi(c, true, lang))   // narasi mengikuti bahasa UI
       setErrors(p => ({ ...p, narasi: null }))
     } catch (e) {
       setErrors(p => ({ ...p, narasi: e.message }))
     } finally {
       setLoading(p => ({ ...p, narasi: false }))
     }
-  }, [])
+  }, [lang])
 
   const refresh = useCallback(async () => {
     if (!city) return
@@ -79,6 +79,11 @@ export function useAnalysis(city) {
   }, [city, fetchAlerts, fetchWeather, fetchVulnerability, fetchNarasi])
 
   useEffect(() => { refresh() }, [city])
+
+  // Re-fetch narasi saja saat bahasa berubah (tanpa fetch ulang yang lain)
+  useEffect(() => {
+    if (city) fetchNarasi(city)
+  }, [lang]) // eslint-disable-line
 
   // Auto-refresh setiap 5 menit
   useEffect(() => {

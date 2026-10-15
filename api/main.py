@@ -484,15 +484,16 @@ def get_vulnerability(
 def get_narasi(
     city:       str,
     use_gemini: bool = Query(True, description="Pakai Gemini AI (fallback ke template)"),
+    lang:       str  = Query("id", description="Bahasa narasi: id / en"),
 ):
-    """Narasi bahasa Indonesia dari hasil analisis."""
+    """Narasi hasil analisis — Bahasa Indonesia (id) atau English (en)."""
     city = _validate_city(city)
     try:
         from engine.narrator import generate_narasi
         from engine.scoring import score_city
 
         result, _, _ = score_city(city)
-        output = generate_narasi(result, use_gemini=use_gemini)
+        output = generate_narasi(result, use_gemini=use_gemini, lang=lang)
 
         return NarasiResponse(
             city         = city,
@@ -513,6 +514,7 @@ def full_analysis(
     city:       str,
     use_gemini: bool = Query(True),
     flood_only: bool = Query(True),
+    lang:       str  = Query("id", description="Bahasa narasi: id / en"),
 ):
     """
     Full pipeline dalam satu request:
@@ -535,7 +537,7 @@ def full_analysis(
         )
 
         # 4. Generate narasi
-        narasi_out  = generate_narasi(vuln_result, use_gemini=use_gemini)
+        narasi_out  = generate_narasi(vuln_result, use_gemini=use_gemini, lang=lang)
 
         # 5. Build response
         alert_summaries = [

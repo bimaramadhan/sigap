@@ -1,13 +1,14 @@
 import { AlertTriangle, Bell, Clock, MapPin, ChevronDown, ChevronUp } from 'lucide-react'
 import { useState } from 'react'
 import clsx from 'clsx'
+import { useLanguage } from '../lib/LanguageContext.jsx'
 
 const SEVERITY_CONFIG = {
-  Extreme:  { bg: 'bg-red-500/15',    border: 'border-red-500/40',    text: 'text-red-300',    dot: 'bg-red-500',    label: 'Ekstrem', pulse: true  },
-  Severe:   { bg: 'bg-orange-500/15', border: 'border-orange-500/40', text: 'text-orange-300', dot: 'bg-orange-500', label: 'Parah',   pulse: false },
-  Moderate: { bg: 'bg-yellow-500/15', border: 'border-yellow-500/40', text: 'text-yellow-300', dot: 'bg-yellow-500', label: 'Sedang',  pulse: false },
-  Minor:    { bg: 'bg-blue-500/15',   border: 'border-blue-500/40',   text: 'text-blue-300',   dot: 'bg-blue-500',   label: 'Ringan',  pulse: false },
-  Unknown:  { bg: 'bg-gray-500/15',   border: 'border-gray-500/40',   text: 'text-gray-400',   dot: 'bg-gray-500',   label: '?',       pulse: false },
+  Extreme:  { bg: 'bg-red-500/15',    border: 'border-red-500/40',    text: 'text-red-300',    dot: 'bg-red-500',    labelKey: 'alert.extreme',  pulse: true  },
+  Severe:   { bg: 'bg-orange-500/15', border: 'border-orange-500/40', text: 'text-orange-300', dot: 'bg-orange-500', labelKey: 'alert.severe',   pulse: false },
+  Moderate: { bg: 'bg-yellow-500/15', border: 'border-yellow-500/40', text: 'text-yellow-300', dot: 'bg-yellow-500', labelKey: 'alert.moderate', pulse: false },
+  Minor:    { bg: 'bg-blue-500/15',   border: 'border-blue-500/40',   text: 'text-blue-300',   dot: 'bg-blue-500',   labelKey: 'alert.minor',    pulse: false },
+  Unknown:  { bg: 'bg-gray-500/15',   border: 'border-gray-500/40',   text: 'text-gray-400',   dot: 'bg-gray-500',   labelKey: 'alert.unknown',  pulse: false },
 }
 
 // Light mode overrides (lebih solid)
@@ -20,6 +21,7 @@ const SEVERITY_LIGHT = {
 }
 
 function AlertItem({ alert, isDark }) {
+  const { t, fmtTime, fmtDateTime } = useLanguage()
   const [expanded, setExpanded] = useState(false)
   const darkCfg  = SEVERITY_CONFIG[alert.severity] ?? SEVERITY_CONFIG.Unknown
   const lightCfg = SEVERITY_LIGHT[alert.severity]  ?? SEVERITY_LIGHT.Unknown
@@ -47,7 +49,7 @@ function AlertItem({ alert, isDark }) {
             <p className={clsx('font-semibold leading-snug', cfg.text)}>{alert.title}</p>
             <div className={clsx('flex items-center gap-3 mt-1 text-xs opacity-70', cfg.text)}>
               <span className="flex items-center gap-1">
-                <MapPin size={10} />{alert.kecamatan_count} kecamatan
+                <MapPin size={10} />{alert.kecamatan_count} {t('alert.kecamatan')}
               </span>
               {alert.expires && (
                 <span className={clsx(
@@ -55,7 +57,7 @@ function AlertItem({ alert, isDark }) {
                   isExpiringSoon && 'font-semibold opacity-100'
                 )}>
                   <Clock size={10} />
-                  {exp.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                  {fmtTime(exp)}
                 </span>
               )}
             </div>
@@ -68,7 +70,7 @@ function AlertItem({ alert, isDark }) {
             isDark ? 'bg-black/20' : 'bg-white/60',
             cfg.text
           )}>
-            {darkCfg.label}
+            {t(darkCfg.labelKey)}
           </span>
           <span className={clsx('opacity-50', cfg.text)}>
             {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
@@ -80,15 +82,15 @@ function AlertItem({ alert, isDark }) {
         <div className={clsx('mt-2.5 pt-2.5 border-t space-y-1 text-xs opacity-80', cfg.text,
           isDark ? 'border-white/10' : 'border-black/10'
         )}>
-          <p><span className="font-medium">Provinsi:</span> {alert.province}</p>
+          <p><span className="font-medium">{t('alert.province')}</span> {alert.province}</p>
           {alert.effective && (
-            <p><span className="font-medium">Mulai:</span>{' '}
-              {new Date(alert.effective).toLocaleString('id-ID')}
+            <p><span className="font-medium">{t('alert.start')}</span>{' '}
+              {fmtDateTime(alert.effective)}
             </p>
           )}
           {alert.expires && (
-            <p><span className="font-medium">Berakhir:</span>{' '}
-              {exp.toLocaleString('id-ID')}
+            <p><span className="font-medium">{t('alert.end')}</span>{' '}
+              {fmtDateTime(exp)}
             </p>
           )}
         </div>
@@ -98,6 +100,7 @@ function AlertItem({ alert, isDark }) {
 }
 
 export default function AlertPanel({ data, loading, isDark }) {
+  const { t } = useLanguage()
   if (loading) {
     return (
       <div className="space-y-2">
@@ -125,13 +128,13 @@ export default function AlertPanel({ data, loading, isDark }) {
         )}>
           <AlertTriangle size={13} />
           <span className="font-semibold">{flood_alerts}</span>
-          <span className="opacity-80">banjir</span>
+          <span className="opacity-80">{t('alert.flood')}</span>
         </div>
         <div className={clsx('flex items-center gap-1.5 text-xs',
           isDark ? 'text-gray-400' : 'text-gray-500'
         )}>
           <Bell size={12} />
-          <span>{total_alerts} total</span>
+          <span>{total_alerts} {t('alert.total')}</span>
         </div>
       </div>
 
@@ -141,8 +144,8 @@ export default function AlertPanel({ data, loading, isDark }) {
           isDark ? 'text-gray-500' : 'text-gray-400'
         )}>
           <Bell size={24} className="mx-auto mb-2 opacity-30" />
-          <p>Tidak ada alert banjir aktif</p>
-          <p className="text-xs mt-1 opacity-60">Refresh setiap 5 menit</p>
+          <p>{t('alert.empty')}</p>
+          <p className="text-xs mt-1 opacity-60">{t('alert.refreshNote')}</p>
         </div>
       ) : (
         <div className="space-y-2 max-h-60 overflow-y-auto pr-0.5">
@@ -153,7 +156,7 @@ export default function AlertPanel({ data, loading, isDark }) {
       )}
 
       <p className={clsx('text-xs text-center', isDark ? 'text-gray-600' : 'text-gray-400')}>
-        Sumber: BMKG Open Data API
+        {t('alert.source')}
       </p>
     </div>
   )

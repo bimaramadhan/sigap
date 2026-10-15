@@ -32,6 +32,7 @@ import FloodInputPanel from './FloodInputPanel.jsx'
 import GoogleIcon from './GoogleIcon.jsx'
 import { useTheme } from '../lib/ThemeContext.jsx'
 import { useAuth } from '../lib/AuthContext.jsx'
+import { useLanguage } from '../lib/LanguageContext.jsx'
 
 export default function ReportPage({
   selectedCity,
@@ -49,6 +50,7 @@ export default function ReportPage({
 }) {
   const { theme } = useTheme()
   const { user, isAuthenticated, openAuthModal, logout } = useAuth()
+  const { t } = useLanguage()
   const isDark = theme === 'dark'
 
   // View mode: 'both' | 'briefing' | 'laporan'
@@ -101,10 +103,10 @@ export default function ReportPage({
                 <h1 className={clsx('text-xl md:text-2xl font-bold tracking-tight',
                   isDark ? 'text-white' : 'text-gray-900'
                 )}>
-                  Laporan & Briefing Situasi Banjir
+                  {t('reportPage.title')}
                 </h1>
                 <p className={clsx('text-xs md:text-sm mt-0.5', textMuted)}>
-                  Intelijen AI kebencanaan dan umpan balik pelaporan lapangan tingkat desa/kelurahan BPBD
+                  {t('reportPage.subtitle')}
                 </p>
               </div>
 
@@ -115,7 +117,7 @@ export default function ReportPage({
                   isDark ? 'bg-gray-800/80 border-gray-700 text-gray-200' : 'bg-gray-100 border-gray-300 text-gray-800'
                 )}>
                   <MapPin size={13} className="text-blue-500 shrink-0" />
-                  <span className={textMuted}>Kota/Kab:</span>
+                  <span className={textMuted}>{t('reportPage.cityLabel')}</span>
                   {cities && cities.length > 0 && onCityChange ? (
                     <div ref={cityComboRef} className="relative">
                       <button
@@ -153,7 +155,7 @@ export default function ReportPage({
                               type="text"
                               value={citySearch}
                               onChange={(e) => setCitySearch(e.target.value)}
-                              placeholder="Cari kota/kabupaten..."
+                              placeholder={t('reportPage.citySearch')}
                               className={clsx(
                                 'w-full text-xs px-2.5 py-1.5 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition',
                                 isDark
@@ -193,7 +195,7 @@ export default function ReportPage({
                               </li>
                             )) : (
                               <li className={clsx('px-3 py-3 text-center', isDark ? 'text-gray-500' : 'text-gray-400')}>
-                                Tidak ditemukan
+                                {t('reportPage.notFound')}
                               </li>
                             )}
                           </ul>
@@ -209,8 +211,8 @@ export default function ReportPage({
                   'flex items-center gap-1.5 px-3 py-1 rounded-xl border text-xs',
                   isDark ? 'bg-blue-500/10 border-blue-500/30 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-700'
                 )}>
-                  <span className="font-semibold">{totalVillages} Desa/Kelurahan</span>
-                  <span className="opacity-75 font-normal">({totalKecamatan} Kecamatan)</span>
+                  <span className="font-semibold">{totalVillages} {t('reportPage.villages')}</span>
+                  <span className="opacity-75 font-normal">({totalKecamatan} {t('reportPage.kecamatan')})</span>
                 </div>
               </div>
             </div>
@@ -231,7 +233,7 @@ export default function ReportPage({
                 )}>
                   <ShieldAlert size={14} />
                   <div>
-                    <span className="font-semibold">Status: {vulnerability.category}</span>
+                    <span className="font-semibold">{t('reportPage.statusPrefix')}{vulnerability.category}</span>
                     <span className="ml-1 opacity-80">({vulnerability.score}/100)</span>
                   </div>
                 </div>
@@ -245,7 +247,7 @@ export default function ReportPage({
                   : isDark ? 'bg-gray-800 border-gray-700 text-gray-400' : 'bg-gray-100 border-gray-300 text-gray-600'
               )}>
                 <ClipboardList size={13} />
-                <span>{reports.length} Laporan Lapangan</span>
+                <span>{reports.length} {t('reportPage.fieldReports')}</span>
               </div>
 
               {/* Officer Google Auth Status Pill */}
@@ -271,7 +273,7 @@ export default function ReportPage({
                   <button
                     type="button"
                     onClick={logout}
-                    title="Keluar / Logout Petugas"
+                    title={t('reportPage.logoutOfficer')}
                     className="ml-0.5 text-gray-400 hover:text-red-400 transition-colors p-0.5 rounded cursor-pointer"
                   >
                     <LogOut size={12} />
@@ -289,7 +291,7 @@ export default function ReportPage({
                   )}
                 >
                   <GoogleIcon size={14} />
-                  <span>Login Petugas</span>
+                  <span>{t('reportPage.loginOfficer')}</span>
                 </button>
               )}
             </div>
@@ -300,7 +302,7 @@ export default function ReportPage({
           <div className="mt-5 pt-4 border-t border-dashed flex flex-wrap items-center justify-between gap-3"
             style={{ borderColor: isDark ? '#374151' : '#e5e7eb' }}>
             <span className={clsx('text-xs font-medium', textMuted)}>
-              Pilihan Tampilan:
+              {t('reportPage.viewMode')}
             </span>
 
             <div className={clsx(
@@ -318,7 +320,7 @@ export default function ReportPage({
                 )}
               >
                 <Columns size={13} />
-                <span>Berdampingan</span>
+                <span>{t('reportPage.sideBySide')}</span>
               </button>
 
               <button
@@ -332,7 +334,7 @@ export default function ReportPage({
                 )}
               >
                 <MessageSquare size={13} />
-                <span>AI Briefing</span>
+                <span>{t('reportPage.aiBriefing')}</span>
               </button>
 
               <button
@@ -346,7 +348,7 @@ export default function ReportPage({
                 )}
               >
                 <Droplets size={13} />
-                <span>Laporan Lapangan</span>
+                <span>{t('reportPage.fieldReport')}</span>
                 {reports.length > 0 && (
                   <span className={clsx(
                     'text-[10px] px-1.5 py-0.2 rounded-full font-bold',
@@ -384,10 +386,10 @@ export default function ReportPage({
                     <h2 className={clsx('text-sm md:text-base font-bold',
                       isDark ? 'text-white' : 'text-gray-900'
                     )}>
-                      AI Briefing & Rekomendasi Taktis
+                      {t('reportPage.panel1Title')}
                     </h2>
                     <p className={clsx('text-xs', textMuted)}>
-                      Sintesis otomatis ancaman, langkah prioritas, dan alokasi sumber daya
+                      {t('reportPage.panel1Sub')}
                     </p>
                   </div>
                 </div>
@@ -419,10 +421,10 @@ export default function ReportPage({
                     <h2 className={clsx('text-sm md:text-base font-bold',
                       isDark ? 'text-white' : 'text-gray-900'
                     )}>
-                      Laporan Lapangan Koordinator BPBD
+                      {t('reportPage.panel2Title')}
                     </h2>
                     <p className={clsx('text-xs', textMuted)}>
-                      Input kondisi genangan dan banjir per desa/kelurahan di {cityName || selectedCity} (BNPB No.2/2024)
+                      {t('reportPage.panel2Sub', { city: cityName || selectedCity })}
                     </p>
                   </div>
                 </div>

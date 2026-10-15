@@ -1,8 +1,10 @@
 import { Bot, FileText, Zap, ChevronDown, ChevronUp, Package } from 'lucide-react'
 import { useState } from 'react'
 import clsx from 'clsx'
+import { useLanguage } from '../lib/LanguageContext.jsx'
 
 function ResourceRow({ label, value, isDark }) {
+  const { fmtNum } = useLanguage()
   return (
     <div className={clsx(
       'flex items-center justify-between py-1.5 border-b last:border-0',
@@ -14,13 +16,14 @@ function ResourceRow({ label, value, isDark }) {
       <span className={clsx('text-sm font-semibold',
         isDark ? 'text-white' : 'text-gray-900'
       )}>
-        {typeof value === 'number' ? value.toLocaleString('id-ID') : value}
+        {typeof value === 'number' ? fmtNum(value) : value}
       </span>
     </div>
   )
 }
 
 export default function NarasiPanel({ narasi, vulnerability, loading, isDark }) {
+  const { t, fmtNum, fmtTime } = useLanguage()
   const [showResources, setShowResources] = useState(false)
 
   if (loading) {
@@ -67,16 +70,14 @@ export default function NarasiPanel({ narasi, vulnerability, loading, isDark }) 
         )}>
           {isGemini ? <Zap size={11} /> : <FileText size={11} />}
           {isAIStudio
-            ? `Gemini AI Studio (Free)`
+            ? t('narasi.srcAIStudio')
             : isGemini
-            ? `Gemini Vertex AI`
-            : 'Template Engine'
+            ? t('narasi.srcVertex')
+            : t('narasi.srcTemplate')
           }
         </div>
         <span className={clsx('text-xs', isDark ? 'text-gray-600' : 'text-gray-400')}>
-          {new Date(narasi.generated_at).toLocaleTimeString('id-ID', {
-            hour: '2-digit', minute: '2-digit'
-          })}
+          {fmtTime(narasi.generated_at)}
         </span>
       </div>
 
@@ -99,7 +100,7 @@ export default function NarasiPanel({ narasi, vulnerability, loading, isDark }) 
           <p className={clsx('text-xs uppercase tracking-wider mb-2',
             isDark ? 'text-gray-500' : 'text-gray-400'
           )}>
-            Tindakan Prioritas
+            {t('narasi.priorityActions')}
           </p>
           {actions.slice(0, 5).map((action, i) => {
             const isCritical = action.startsWith('🚨')
@@ -141,7 +142,7 @@ export default function NarasiPanel({ narasi, vulnerability, loading, isDark }) 
               isDark ? 'text-gray-300' : 'text-gray-700'
             )}>
               <Package size={14} />
-              <span className="font-medium">Kebutuhan Resource</span>
+              <span className="font-medium">{t('narasi.resourceNeeds')}</span>
             </div>
             <span className={isDark ? 'text-gray-500' : 'text-gray-400'}>
               {showResources ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -150,11 +151,11 @@ export default function NarasiPanel({ narasi, vulnerability, loading, isDark }) 
 
           {showResources && (
             <div className="px-4 py-2 fade-in">
-              <ResourceRow label="Est. Jiwa Terdampak"   value={`${resources.estimated_affected?.toLocaleString('id-ID')} jiwa`} isDark={isDark} />
-              <ResourceRow label="Perahu Evakuasi"        value={`${resources.perahu_minimal} unit`}    isDark={isDark} />
-              <ResourceRow label="Tim SAR"                value={`${resources.tim_sar_minimal} tim`}    isDark={isDark} />
-              <ResourceRow label="Titik Pengungsian"      value={`${resources.titik_evakuasi} titik`}   isDark={isDark} />
-              <ResourceRow label="Stok Logistik"          value={`${resources.logistik_hari} hari`}     isDark={isDark} />
+              <ResourceRow label={t('narasi.estAffected')} value={`${fmtNum(resources.estimated_affected)} ${t('narasi.people')}`} isDark={isDark} />
+              <ResourceRow label={t('narasi.boats')}       value={`${resources.perahu_minimal} ${t('narasi.unit')}`}    isDark={isDark} />
+              <ResourceRow label={t('narasi.sar')}         value={`${resources.tim_sar_minimal} ${t('narasi.team')}`}    isDark={isDark} />
+              <ResourceRow label={t('narasi.shelter')}     value={`${resources.titik_evakuasi} ${t('narasi.point')}`}   isDark={isDark} />
+              <ResourceRow label={t('narasi.logistics')}   value={`${resources.logistik_hari} ${t('narasi.days')}`}     isDark={isDark} />
             </div>
           )}
         </div>

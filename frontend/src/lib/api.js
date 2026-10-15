@@ -92,7 +92,7 @@ export async function getVulnerability(city) {
   }
 }
 
-export async function getNarasi(city, useGemini = true) {
+export async function getNarasi(city, useGemini = true, lang = 'id') {
   if (USE_MOCK) {
     await delay(1200)
     return {
@@ -106,7 +106,7 @@ export async function getNarasi(city, useGemini = true) {
     }
   }
   try {
-    return (await http.get(`/narasi/${city}`, { params: { use_gemini: useGemini } })).data
+    return (await http.get(`/narasi/${city}`, { params: { use_gemini: useGemini, lang } })).data
   } catch {
     console.warn(`Fallback → mock narasi (${city})`)
     return {

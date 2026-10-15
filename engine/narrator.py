@@ -54,15 +54,29 @@ Aturan penting:
 - Maksimal 300 kata"""
 
 
-def _build_prompt(result, polygons: dict | None = None) -> str:
+def _build_prompt(result, polygons: dict | None = None, lang: str = "id") -> str:
     """
     Build prompt dari VulnerabilityResult untuk Gemini.
 
     Meng-inject dua konteks tambahan secara scalable (tanpa markdown per kota):
       1. Profil kota — dirangkai otomatis dari data (city_profile.build_city_context)
       2. SOP universal — dari knowledge/sop/*.md, berlaku semua kota
+
+    lang: "id" → narasi bahasa Indonesia, "en" → English.
     """
     bd = result.score_breakdown()
+
+    # Instruksi bahasa output (ditambahkan di akhir prompt)
+    if lang == "en":
+        lang_instruction = (
+            "\n\nIMPORTANT: Write the ENTIRE briefing in ENGLISH. "
+            "Keep Indonesian proper nouns (city/district/river names, agency names "
+            "like BPBD/BNPB/BMKG) as-is, but all narrative, labels, and recommendations "
+            "must be in clear professional English. Keep status levels but add English "
+            "in parentheses, e.g. 'SIAGA (Standby)', 'AWAS (Danger)'."
+        )
+    else:
+        lang_instruction = ""
 
     # ── Konteks tambahan (scalable, bukan markdown per kota) ──────────────────
     city_ctx = ""
@@ -110,7 +124,7 @@ REKOMENDASI SISTEM:
 Tulis briefing situasi untuk koordinator lapangan. Format:
 1. Satu paragraf ringkasan situasi (2-3 kalimat)
 2. Daftar 3-5 tindakan prioritas yang harus dilakukan sekarang
-3. Satu kalimat penutup tentang sumber daya kritis yang dibutuhkan"""
+3. Satu kalimat penutup tentang sumber daya kritis yang dibutuhkan{lang_instruction}"""
 
 
 # ── Google AI Studio (google-genai SDK) ───────────────────────────────────────
@@ -310,9 +324,9 @@ def _template_narasi(result) -> str:
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
-def generate_narasi(result, use_gemini: bool = True, polygons: dict | None = None) -> dict:
+def generate_narasi(result, use_gemini: bool = True, polygons: dict | None = None, lang: str = "id") -> dict:
     """
-    Generate narasi bahasa Indonesia dari VulnerabilityResult.
+    Generate narasi dari VulnerabilityResult.
 
     Urutan prioritas:
     1. Google AI Studio (GRATIS) — jika GEMINI_API_KEY ada di .env
@@ -323,6 +337,7 @@ def generate_narasi(result, use_gemini: bool = True, polygons: dict | None = Non
         result:      VulnerabilityResult dari vulnerability.py
         use_gemini:  Coba Gemini dulu, fallback ke template jika gagal
         polygons:    GeoJSON vulnerability-map (opsional) untuk konteks per-kecamatan
+        lang:        "id" (Bahasa Indonesia) atau "en" (English)
 
     Returns:
         dict dengan keys: narasi, source, model
@@ -339,7 +354,7 @@ def generate_narasi(result, use_gemini: bool = True, polygons: dict | None = Non
     if gemini_init:
         source_type, client_or_model = gemini_init
         try:
-            prompt = _build_prompt(result, polygons=polygons)
+            prompt = _build_prompt(result, polygons=polygons, lang=lang)
             if source_type == "aistudio":
                 narasi = _generate_with_aistudio(client_or_model, prompt)
                 logger.success(f"  Narasi Gemini AI Studio berhasil ({len(narasi)} chars)")

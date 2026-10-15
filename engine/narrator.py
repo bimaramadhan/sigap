@@ -46,13 +46,46 @@ Aturan penting:
 - Jangan sebut istilah teknis seperti "return period", "flood ratio", atau "vulnerability score"
 - Fokus pada: APA yang akan terjadi, SIAPA yang paling berisiko, APA yang harus dilakukan SEKARANG
 - Level status menggunakan NORMAL/WASPADA/SIAGA/AWAS sesuai Peraturan BNPB No.2/2024
+- Jika ada bagian "SOP & PEDOMAN BNPB" dalam konteks, jadikan ACUAN WAJIB untuk
+  rekomendasi tindakan dan perhitungan kebutuhan sumber daya. Jangan membuat
+  rekomendasi yang bertentangan dengan SOP tersebut.
+- Jika ada "PROFIL WILAYAH", sebut kecamatan spesifik yang paling berisiko
+  dalam rekomendasi evakuasi.
 - Maksimal 300 kata"""
 
 
-def _build_prompt(result) -> str:
-    """Build prompt dari VulnerabilityResult untuk Gemini."""
+def _build_prompt(result, polygons: dict | None = None) -> str:
+    """
+    Build prompt dari VulnerabilityResult untuk Gemini.
+
+    Meng-inject dua konteks tambahan secara scalable (tanpa markdown per kota):
+      1. Profil kota — dirangkai otomatis dari data (city_profile.build_city_context)
+      2. SOP universal — dari knowledge/sop/*.md, berlaku semua kota
+    """
     bd = result.score_breakdown()
+
+    # ── Konteks tambahan (scalable, bukan markdown per kota) ──────────────────
+    city_ctx = ""
+    sop_ctx  = ""
+    try:
+        from engine.city_profile import build_city_context, build_sop_context
+        from engine.wilayah_geo import get_profil
+        geo = get_profil(getattr(result, "city", "")) or None
+        city_ctx = build_city_context(result, polygons=polygons, geo=geo)
+        sop_ctx  = build_sop_context(max_chars=5000)
+    except Exception as exc:
+        logger.warning(f"  Konteks kota/SOP gagal dimuat: {exc}")
+
+    knowledge_block = ""
+    if city_ctx:
+        knowledge_block += f"\n{city_ctx}\n"
+    if sop_ctx:
+        knowledge_block += (
+            f"\nSOP & PEDOMAN BNPB (acuan wajib untuk rekomendasi):\n{sop_ctx}\n"
+        )
+
     return f"""Berikan briefing situasi bencana untuk koordinator BPBD {result.city_label}.
+{knowledge_block}
 
 DATA SITUASI:
 - Status: {result.category} (skor {result.score}/100)
@@ -277,7 +310,7 @@ def _template_narasi(result) -> str:
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
-def generate_narasi(result, use_gemini: bool = True) -> dict:
+def generate_narasi(result, use_gemini: bool = True, polygons: dict | None = None) -> dict:
     """
     Generate narasi bahasa Indonesia dari VulnerabilityResult.
 
@@ -289,6 +322,7 @@ def generate_narasi(result, use_gemini: bool = True) -> dict:
     Args:
         result:      VulnerabilityResult dari vulnerability.py
         use_gemini:  Coba Gemini dulu, fallback ke template jika gagal
+        polygons:    GeoJSON vulnerability-map (opsional) untuk konteks per-kecamatan
 
     Returns:
         dict dengan keys: narasi, source, model
@@ -305,7 +339,7 @@ def generate_narasi(result, use_gemini: bool = True) -> dict:
     if gemini_init:
         source_type, client_or_model = gemini_init
         try:
-            prompt = _build_prompt(result)
+            prompt = _build_prompt(result, polygons=polygons)
             if source_type == "aistudio":
                 narasi = _generate_with_aistudio(client_or_model, prompt)
                 logger.success(f"  Narasi Gemini AI Studio berhasil ({len(narasi)} chars)")

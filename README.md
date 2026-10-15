@@ -209,19 +209,20 @@ pip install -r requirements.txt
 # 3. Konfigurasi
 cp .env.example .env
 # Edit .env: isi GEMINI_API_KEY dari aistudio.google.com
-# Opsional: isi DATABASE_URL jika pakai Cloud SQL
+# .env.example sudah SKIP_DB=true → langsung jalan tanpa database
 
-# 4. Jalankan PostgreSQL
-docker compose up -d
-
-# 5. Jalankan backend (terminal 1)
+# 4. Jalankan backend (terminal 1)
 uvicorn api.main:app --reload --port 8080
 
-# 6. Jalankan frontend (terminal 2)
+# 5. Jalankan frontend (terminal 2)
 cd frontend
 npm install
 npm run dev
 ```
+
+> **Tanpa database?** Default `SKIP_DB=true` → backend pakai file cache,
+> tidak butuh Docker/Postgres. Cocok untuk demo. Lihat bagian
+> [Pilihan Database](#pilihan-database) untuk mengaktifkan Postgres.
 
 > **Apple Silicon (M1/M2/M3)?** Package geospatial sudah punya binary wheel untuk arm64.
 > Kalau ada error saat install: `brew install gdal proj geos` lalu ulangi `pip install`.
@@ -242,15 +243,12 @@ pip install -r requirements.txt
 
 # 3. Konfigurasi
 Copy-Item .env.example .env
-notepad .env   # isi GEMINI_API_KEY
+notepad .env   # isi GEMINI_API_KEY (SKIP_DB sudah true by default)
 
-# 4. Jalankan PostgreSQL
-docker compose up -d
-
-# 5. Backend
+# 4. Backend (terminal 1)
 uvicorn api.main:app --reload --port 8080
 
-# 6. Frontend (terminal baru)
+# 5. Frontend (terminal baru)
 cd frontend
 npm install
 npm run dev
@@ -279,7 +277,8 @@ npm run dev
 |---|---|---|---|
 | `GEMINI_API_KEY` | ✅ untuk AI | — | Dari [aistudio.google.com](https://aistudio.google.com) |
 | `GEMINI_MODEL` | ✅ untuk AI | `gemini-3.5-flash` | Model Gemini yang digunakan |
-| `DATABASE_URL` | ✅ untuk DB | `postgresql://sigap:sigap@localhost:5432/sigap` | Postgres connection string |
+| `SKIP_DB` | — | `true` | `true` = file cache (tanpa Postgres); `false` = pakai Postgres |
+| `DATABASE_URL` | ⚠️ jika `SKIP_DB=false` | `postgresql://sigap:sigap@localhost:5432/sigap` | Postgres connection string |
 | `DEMO_MODE` | — | `false` | `true` = skip Gemini + EE, pakai template |
 | `REFRESH_TOKEN` | — | — | Token untuk Cloud Scheduler endpoint |
 | `GCP_PROJECT_ID` | — | — | Hanya jika pakai Vertex AI (berbayar) |
@@ -287,17 +286,39 @@ npm run dev
 
 ---
 
-### Tanpa Docker (Development Mode)
+### Pilihan Database
 
-Bisa jalan tanpa Postgres — sistem akan fallback ke file JSON untuk cache:
+SIGAP bisa jalan dengan atau tanpa database.
+
+#### Opsi A — Tanpa Database (default, paling mudah)
+
+Set `SKIP_DB=true` di `.env` (sudah default di `.env.example`). Backend pakai
+file cache di `data/cache/` dan laporan tersimpan di `data/flood_reports.json`.
+**Tidak butuh Docker atau Postgres.** Cocok untuk demo & development.
+
+#### Opsi B — PostgreSQL via Docker
 
 ```bash
-# Jalankan tanpa docker compose up
-DEMO_MODE=false uvicorn api.main:app --reload --port 8080
+docker compose up -d        # Postgres 16, kredensial sigap/sigap
+# set SKIP_DB=false di .env
+uvicorn api.main:app --reload --port 8080
 ```
 
-> Laporan lapangan akan tersimpan di `data/flood_reports.json` dan diimport ke Postgres
-> otomatis saat database tersedia pertama kali.
+#### Opsi C — PostgreSQL install langsung (tanpa Docker)
+
+1. Download [PostgreSQL 16](https://www.enterprisedb.com/downloads/postgres-postgresql-downloads)
+2. Saat install: set port `5432`, catat password user `postgres`
+3. Buat database & user lewat **SQL Shell (psql)**:
+   ```sql
+   CREATE USER sigap WITH PASSWORD 'sigap';
+   CREATE DATABASE sigap OWNER sigap;
+   GRANT ALL PRIVILEGES ON DATABASE sigap TO sigap;
+   ```
+4. Set `SKIP_DB=false` di `.env`
+5. Jalankan backend — tabel + 90k kode wilayah ter-seed otomatis saat pertama
+
+> Beralih antara opsi cukup dengan ubah `SKIP_DB` di `.env` lalu restart backend.
+> Data laporan di JSON otomatis diimport ke Postgres saat pertama kali DB tersedia.
 
 ---
 
@@ -398,19 +419,24 @@ sigap/
 │   └── src/
 │       ├── App.jsx           # Layout utama: sidebar, tabs, city state
 │       ├── components/
-│       │   ├── Header.jsx           # Search kota, refresh, theme toggle
+│       │   ├── Header.jsx           # Search 514 kota, nav tabs, theme toggle
 │       │   ├── WeatherBar.jsx       # Strip cuaca + rainfall BMKG
 │       │   ├── AlertPanel.jsx       # BMKG alerts dengan severity badge
 │       │   ├── VulnerabilityCard.jsx # Arc gauge + breakdown bars
 │       │   ├── NarasiPanel.jsx      # AI narasi + priority actions + resources
 │       │   ├── MapView.jsx          # Leaflet + InaRisk polygon + KecamatanPanel
-│       │   └── FloodInputPanel.jsx  # Form laporan lapangan per desa
+│       │   ├── FloodInputPanel.jsx  # Form laporan lapangan per desa
+│       │   ├── FloodReportPanel.jsx # Panel laporan + riwayat
+│       │   ├── ReportPage.jsx       # Halaman laporan penuh (/report)
+│       │   ├── GoogleAuthModal.jsx  # Modal login Google (GSI)
+│       │   └── GoogleIcon.jsx       # Ikon Google
 │       ├── hooks/
 │       │   ├── useAnalysis.js       # Fetch /analyze/{city}, auto-refresh 5 menit
 │       │   └── useFloodReports.js
 │       └── lib/
 │           ├── api.js               # Semua HTTP calls ke backend
 │           ├── mockData.js          # Fallback mock data
+│           ├── AuthContext.jsx      # State login Google (frontend)
 │           └── ThemeContext.jsx     # Dark/light mode
 │
 ├── db/
@@ -462,25 +488,56 @@ sigap/
 
 | Komponen | File | Status |
 |---|---|---|
-| Layout + routing | `App.jsx` | ✅ |
-| City search | `Header.jsx` | ✅ Search 514+ kab/kota |
+| Layout + routing (Dashboard / Report page) | `App.jsx` | ✅ Dua halaman: `/` dan `/report` |
+| City search 514 kab/kota | `Header.jsx` | ✅ Searchable dropdown + nav tabs |
 | Weather strip | `WeatherBar.jsx` | ✅ |
 | BMKG alerts | `AlertPanel.jsx` | ✅ Per-provinsi filter |
 | Score gauge | `VulnerabilityCard.jsx` | ✅ Arc gauge + 7 komponen |
 | AI briefing | `NarasiPanel.jsx` | ✅ |
-| Peta interaktif | `MapView.jsx` | ✅ Klik polygon → KecamatanPanel |
-| Laporan lapangan | `FloodInputPanel.jsx` | ✅ Per-desa/kelurahan |
+| Peta interaktif | `MapView.jsx` | ✅ Fit-bounds dinamis + klik polygon → KecamatanPanel |
+| Laporan lapangan (input) | `FloodInputPanel.jsx` | ✅ Searchable desa/kelurahan |
+| Laporan lapangan (panel + riwayat) | `FloodReportPanel.jsx` | ✅ |
+| Halaman laporan penuh | `ReportPage.jsx` | ✅ Terpisah dari dashboard |
+| Login Google (frontend) | `AuthContext.jsx`, `GoogleAuthModal.jsx` | ⚠️ GSI, belum verifikasi backend |
 
 ### Infrastructure
 
 | Komponen | Status |
 |---|---|
 | PostgreSQL (Docker) | ✅ `docker compose up -d` |
-| Fallback tanpa Docker | ✅ JSON file cache |
+| PostgreSQL (install langsung) | ✅ Alternatif tanpa Docker — lihat Setup |
+| Mode tanpa DB (`SKIP_DB=true`) | ✅ File cache, demo tanpa Postgres |
 | Google AI Studio (gratis) | ✅ `GEMINI_API_KEY` di `.env` |
 | Vertex AI | ⚠️ Opsional, butuh GCP billing |
 | Google Earth Engine | ⚠️ Fallback terakhir, butuh GEE auth |
-| Cloud Scheduler | ⚠️ Production only (`/internal/refresh-baselines`) |
+| Auth di API backend | ❌ Belum — semua endpoint terbuka |
+| Deploy publik | ❌ Belum — belum ada manifest Vercel/Cloud Run |
+
+---
+
+## Apa yang Sudah vs Belum
+
+**✅ Sudah jalan (inti sistem):**
+- Data real-time: BMKG alert + prakiraan cuaca, InaRisk BNPB 6 layer
+- Vulnerability score dinamis: base + weather boost + alert boost + field report boost
+- Peta polygon kecamatan dengan score per kecamatan (514 kab/kota)
+- Narasi AI Gemini (gratis, `gemini-3.5-flash`)
+- Form laporan lapangan BPBD → naikkan skor real-time
+- Database Postgres + mode fallback tanpa DB
+
+**⚠️ Sebagian:**
+- **Knowledge base**: dokumen SOP/kota sudah ditulis di `knowledge/`, TAPI belum
+  dibaca Gemini (narasi masih dari angka saja — lihat ROADMAP prioritas #1)
+- **Login Google**: hanya di frontend, API backend belum verifikasi token
+- **Knowledge kota**: baru Semarang, 3 kota lain belum
+
+**🔲 Belum:**
+- Integrasi knowledge base ke prompt Gemini (RAG) — **prioritas tertinggi berikutnya**
+- Deploy publik (Vercel + Cloud Run/Railway)
+- Kalibrasi threshold dari data historis
+- PetaBencana.id crowdsourced, AWLR sensor sungai
+
+> Detail lengkap + urutan prioritas ada di [ROADMAP.md](ROADMAP.md).
 
 ---
 

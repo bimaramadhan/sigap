@@ -769,52 +769,66 @@ Fokus minggu ini:
 
 ## Checklist Status
 
-Gunakan tabel ini untuk tracking progress tim.
+Status aktual per Oktober 2026 (diverifikasi dari kode, bukan rencana).
 
 ### Data & Pipeline
 
-| Task | PIC | Status | Catatan |
-|---|---|---|---|
-| BMKG nowcast alerts | DS | ✅ Selesai | Real-time, 17 alert hari ini |
-| BMKG prakiraan cuaca per kecamatan | DS | 🔲 Belum | API tersedia di data.bmkg.go.id |
-| Level sungai AWLR | Dhana | 🔲 Belum | Cari akses AFIS BMKG |
-| PetaBencana.id laporan crowdsourced | Dhana | 🔲 Belum | API publik tersedia |
-| InaRisk risiko per kecamatan | Dhana | 🔲 Belum | Explore inarisk.bnpb.go.id |
-| Data BPS populasi per kelurahan | DS | ⚠️ Parsial | Pakai WorldPop, BPS lebih detail |
-| Data OSM jaringan jalan | DS | 🔲 Belum | Butuh untuk rute evakuasi |
+| Task | Status | Catatan |
+|---|---|---|
+| BMKG nowcast alerts | ✅ Selesai | `pipeline/bmkg_ingest.py` — real-time CAP/XML, cache 30 menit, filter flood keyword |
+| BMKG prakiraan cuaca per kecamatan | ✅ Selesai | `pipeline/bmkg_weather.py` — rainfall 12 jam, boost_score 0-25, cache 6 jam |
+| InaRisk risiko per kecamatan | ✅ Selesai | `pipeline/inarisk_loader.py` — 6 layer live (hazard, risk, SLR, kapasitas, pop, kerentanan) |
+| InaRisk polygon kecamatan | ✅ Selesai | `pipeline/inarisk_polygon.py` — batas kecamatan + hazard per polygon |
+| Katalog 514 kab/kota | ✅ Selesai | `engine/wilayah.py` — katalog Kemendagri 90k+ kode (prov/kab/kec/desa) |
+| Data populasi | ⚠️ Parsial | InaRisk INARISKPOP + fallback BPS Sensus 2020 (hardcoded 4 kota) |
+| Level sungai AWLR (sensor) | 🔲 Belum | Hanya input manual via laporan lapangan, bukan sensor otomatis |
+| PetaBencana.id crowdsourced | 🔲 Belum | Belum ada `pipeline/petabencana_ingest.py` |
+| Data OSM jaringan jalan | 🔲 Belum | Untuk rute evakuasi |
 
 ### Knowledge Base
 
-| Task | PIC | Status | Catatan |
-|---|---|---|---|
-| `sop/level_siaga_banjir.md` | Bima | 🔲 Belum | Prioritas #1 |
-| `sop/tindakan_per_level.md` | Bima | 🔲 Belum | |
-| `sop/prioritas_evakuasi.md` | Bima | 🔲 Belum | |
-| `sop/kebutuhan_resource.md` | Bima | 🔲 Belum | |
-| `kota/semarang.md` | Bima | 🔲 Belum | Area rawan, pola banjir |
-| `kota/bekasi.md` | Bima | 🔲 Belum | |
-| `historis/banjir_semarang_2024.md` | Bima | 🔲 Belum | |
+| Task | Status | Catatan |
+|---|---|---|
+| `sop/level_siaga_banjir.md` | ✅ Ada | File tersedia |
+| `sop/kebutuhan_resource.md` | ✅ Ada | File tersedia |
+| `sop/prioritas_evakuasi.md` | ✅ Ada | File tersedia |
+| `sop/sistem_peringatan_dini_bnpb_2024.md` | ✅ Ada | Perka BNPB No.2/2024 |
+| `sop/rambu_papan_informasi_bnpb_2025.md` | ✅ Ada | Perka BNPB No.3/2025 |
+| `sop/status_keadaan_darurat_bnpb.md` | ✅ Ada | Pedoman BNPB 2016 |
+| `kota/semarang.md` | ✅ Ada | Hanya 1 kota — bekasi/jakarta belum |
+| `historis/template_kejadian.md` | ⚠️ Template | Belum ada kejadian nyata terdokumentasi |
+| **Integrasi knowledge → prompt Gemini (RAG)** | ❌ **BELUM** | **Dokumen ada tapi narrator.py TIDAK membacanya** |
 
 ### AI Engine
 
-| Task | PIC | Status | Catatan |
-|---|---|---|---|
-| Integrasikan BMKG alert ke skor | DS | 🔲 Belum | +25 untuk Extreme, dll |
-| Integrasikan curah hujan ke skor | DS | 🔲 Belum | Butuh data Pilar 1 |
-| Integrasikan knowledge base ke Gemini | DS | 🔲 Belum | Butuh Pilar 2 selesai |
-| Kalibrasi threshold dengan data BNPB | DS | 🔲 Belum | Iterasi ke-2 |
+| Task | Status | Catatan |
+|---|---|---|
+| BMKG alert → skor | ✅ Selesai | `_get_alert_boost` di vulnerability.py (+25/+15/+8/+3) |
+| Curah hujan → skor | ✅ Selesai | `weather_boost` dari bmkg_weather, cap gabungan 30 |
+| Laporan lapangan → skor | ✅ Selesai | `scoring.py` tambah field boost, re-kategorisasi live |
+| Narasi Gemini AI Studio (gratis) | ✅ Selesai | `narrator.py` — google-genai, gemini-3.5-flash + fallback template |
+| **Knowledge base ke Gemini prompt (RAG)** | ❌ **BELUM** | **Prompt hanya pakai angka, belum baca SOP/kota** |
+| Kalibrasi threshold dengan data historis | 🔲 Belum | Butuh data banjir log terkumpul dulu |
+
+### Flood Log & Feedback
+
+| Task | Status | Catatan |
+|---|---|---|
+| Database flood_reports | ✅ Selesai | `db/schema.sql` + `engine/flood_report.py` (Postgres + fallback JSON) |
+| Form input laporan lapangan | ✅ Selesai | `FloodInputPanel.jsx`, `FloodReportPanel.jsx`, `ReportPage.jsx` |
+| Re-train / kalibrasi otomatis | 🔲 Belum | `evaluate_predictions` masih proposal, loop belum dua arah |
 
 ### Infrastructure
 
-| Task | PIC | Status | Catatan |
-|---|---|---|---|
-| Setup GCP Project | Semua | ❌ Belum | Critical blocker |
-| Earth Engine auth | DS | ❌ Belum | Butuh GCP |
-| Gemini auth | DS | ❌ Belum | Butuh GCP |
-| Deploy backend publik | BE | 🔲 Belum | Railway/Cloud Run |
-| Deploy frontend publik | FE | 🔲 Belum | Vercel |
-| Database banjir log | BE | 🔲 Belum | Supabase/Cloud SQL |
-| Form input laporan kejadian | FE | 🔲 Belum | |
+| Task | Status | Catatan |
+|---|---|---|
+| Database PostgreSQL | ✅ Selesai | `docker-compose.yml` (Postgres 16) + 5 tabel |
+| Mode tanpa DB (SKIP_DB) | ✅ Selesai | `api/main.py` lifespan — file cache, demo tanpa Docker |
+| Gemini (gratis AI Studio) | ✅ Selesai | Tidak butuh GCP billing lagi |
+| Login Google (frontend) | ⚠️ Parsial | `AuthContext.jsx` GSI, tapi tanpa verifikasi backend |
+| Auth di API backend | ❌ Belum | Semua endpoint terbuka, CORS `*` |
+| Deploy backend publik | 🔲 Belum | Belum ada Dockerfile/Cloud Run manifest |
+| Deploy frontend publik | 🔲 Belum | Belum ada vercel.json |
 
 ---
 
@@ -823,19 +837,54 @@ Gunakan tabel ini untuk tracking progress tim.
 SIGAP dianggap sebagai solusi utuh ketika:
 
 ```
-1. Data masuk otomatis dari BMKG (✅ sebagian sudah)
-2. Skor berubah ketika kondisi berubah (🔲 belum)
-3. Narasi berbasis SOP yang valid (🔲 butuh knowledge base)
-4. Laporan kejadian nyata bisa diinput (🔲 belum)
-5. Sistem belajar dari kejadian yang sudah terjadi (🔲 belum)
-6. Bisa diakses dari internet oleh BPBD (🔲 belum)
-7. Ada autentikasi basic (🔲 belum)
+1. Data masuk otomatis dari BMKG         (✅ SUDAH — alert + prakiraan cuaca)
+2. Skor berubah ketika kondisi berubah   (✅ SUDAH — weather + alert + field boost)
+3. Narasi berbasis SOP yang valid        (⚠️ SEBAGIAN — Gemini jalan, tapi belum baca SOP)
+4. Laporan kejadian nyata bisa diinput   (✅ SUDAH — form + DB flood_reports)
+5. Sistem belajar dari kejadian nyata    (🔲 BELUM — belum ada kalibrasi otomatis)
+6. Bisa diakses dari internet oleh BPBD  (🔲 BELUM — belum deploy)
+7. Ada autentikasi                        (⚠️ SEBAGIAN — login Google frontend, API masih terbuka)
 ```
 
-Untuk hackathon, **minimal nomor 1-3 harus terpenuhi** untuk
-mendapatkan demo yang credible dan defensible saat Q&A juri.
+Untuk hackathon, nomor **1, 2, 4 sudah solid**. Yang paling berdampak untuk
+dikerjakan berikutnya adalah **nomor 3** (knowledge base → Gemini) karena
+dokumen SOP sudah ditulis tapi belum dipakai AI.
+
+---
+
+## Apa yang Perlu Dikerjakan Berikutnya (Prioritas)
+
+Berdasarkan status aktual, ini urutan paling berdampak:
+
+### 🔴 SEGERA — dampak besar, usaha kecil
+
+**1. Wire knowledge base ke prompt Gemini (RAG sederhana)**
+Dokumen SOP di `knowledge/sop/` dan `knowledge/kota/` sudah ditulis lengkap,
+tapi `narrator.py` sama sekali tidak membacanya. Narasi sekarang hanya dari angka.
+Cukup tambah `_load_knowledge(city)` yang inject isi file ke `SYSTEM_PROMPT`.
+Ini mengubah narasi dari "generic" jadi "berdasarkan SOP BPBD resmi" —
+pembeda terbesar untuk Q&A juri. Estimasi: setengah hari.
+
+**2. Demo scenario / simulation button**
+Untuk presentasi live, satu tombol yang submit laporan lapangan AWAS
+lalu skor naik dramatis + Gemini generate ulang. "Wow moment" untuk juri.
+
+### 🟠 PENTING — menguatkan kelengkapan
+
+**3. Lengkapi knowledge kota** (`kota/bekasi.md`, `kota/jakarta.md`, `kota/surabaya.md`)
+Baru Semarang yang ada. Tanpa ini, narasi 3 kota lain kurang kontekstual.
+
+**4. Deploy publik** (Vercel frontend + Cloud Run/Railway backend)
+Supaya juri bisa akses sendiri, bukan cuma lihat di layar presenter.
+
+### 🟡 NICE TO HAVE — kalau waktu cukup
+
+**5. Auth di API backend** — verifikasi token Google di sisi server (sekarang frontend-only).
+**6. PetaBencana.id** — overlay laporan banjir crowdsourced di peta.
+**7. Kalibrasi threshold** — butuh data banjir log terkumpul dulu, cocok pasca-hackathon.
+**8. AWLR sensor** — belum ada API publik stabil, tetap pakai input manual.
 
 ---
 
 *Dokumen ini adalah living document — update setiap ada progress.*
-*Terakhir diupdate: September 2026*
+*Terakhir diupdate: Oktober 2026 (v0.4.0)*

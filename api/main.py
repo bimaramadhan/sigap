@@ -153,6 +153,13 @@ class VulnerabilityResponse(BaseModel):
     resource_needs:   dict
     baseline_fetched_at: str = ""
     baseline_age_hours:  float = 0
+    # Model risiko 3-lapis (UNDRR + saturasi + momentum) [BARU]
+    field_boost:         float = 0.0
+    structural_score:    float = 0.0
+    trigger_multiplier:  float = 1.0
+    momentum_rate:       float = 0.0
+    momentum_label:      str   = ""
+    risk_method:         str   = ""
 
 
 class NarasiResponse(BaseModel):
@@ -277,8 +284,10 @@ def _weather_to_response(w: dict) -> WeatherResponse:
 
 def _vuln_to_response(result) -> VulnerabilityResponse:
     bd = result.score_breakdown()
-    # Hitung base_score dari breakdown (tanpa weather+alert boost)
-    base = round(sum(v for k, v in bd.items() if k not in ("weather", "alert")), 1)
+    # base_score = structural risk (Layer 1 UNDRR) — fondasi sebelum pemicu dinamis
+    base = result.structural_score or round(
+        sum(v for k, v in bd.items() if k not in ("weather", "alert")), 1
+    )
     return VulnerabilityResponse(
         city             = result.city,
         city_label       = result.city_label,
@@ -304,6 +313,12 @@ def _vuln_to_response(result) -> VulnerabilityResponse:
         resource_needs   = result.resource_needs,
         baseline_fetched_at = result.baseline_fetched_at,
         baseline_age_hours  = result.baseline_age_hours,
+        field_boost         = result.field_boost,
+        structural_score    = result.structural_score,
+        trigger_multiplier  = result.trigger_multiplier,
+        momentum_rate       = result.momentum_rate,
+        momentum_label      = result.momentum_label,
+        risk_method         = result.risk_method,
     )
 
 

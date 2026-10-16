@@ -57,20 +57,38 @@ def score_city(
         except Exception as exc:
             logger.warning(f"  Alert fetch gagal: {exc}")
 
+    # calculate() tetap menghasilkan komponen *_score + weather/alert boost.
     result = calculate(kab, features, weather_data, alert_data)
     result.baseline_fetched_at = baseline["fetched_at_iso"]
     result.baseline_age_hours = baseline["age_hours"]
 
+    # Ambil boost laporan lapangan (dipakai Layer 2 risk model)
+    field_reason = ""
     if include_field:
         field = get_latest_boost(kab)
         if field["boost_score"] > 0:
-            extra = min(field["boost_score"], max(0, 30 - result.weather_boost - result.alert_boost))
-            result.score = round(min(100.0, result.score + extra), 1)
-            reason = field.get("reason") or ""
-            result.priority_actions.insert(
-                0,
-                f"📡 Laporan lapangan: {reason} (+{extra:.0f} poin)",
-            )
-            result.category, result.category_message = _get_category(result.score)
+            result.field_boost = float(field["boost_score"])
+            field_reason = field.get("reason") or ""
+
+    # ── Model risiko 3-lapis (UNDRR structural × saturasi × momentum) ────────
+    # Menggantikan penjumlahan linear lama (base + boost) yang bisa "mentok 100".
+    from engine.risk_model import compute_advanced_score
+    adv = compute_advanced_score(result, features, record_history=True)
+
+    result.score              = adv["final_score"]
+    result.structural_score   = adv["structural_score"]
+    result.trigger_multiplier = adv["trigger_multiplier"]
+    result.momentum_rate      = adv["momentum"]["rate_per_hour"]
+    result.momentum_label     = adv["momentum"]["trend_label"]
+    result.risk_method        = adv["_method"]
+    result.category, result.category_message = _get_category(result.score)
+
+    # Konteks tindakan: laporan lapangan + momentum (untuk Gemini & UI)
+    if field_reason:
+        result.priority_actions.insert(0, f"📡 Laporan lapangan: {field_reason}")
+    if adv["momentum"]["direction"] == "rising" and adv["momentum"]["rate_per_hour"] >= 3:
+        result.priority_actions.insert(
+            0, f"⚡ {adv['momentum']['trend_label']} — antisipasi eskalasi 1-2 jam ke depan"
+        )
 
     return result, weather_data or _default_weather(kab), alert_data

@@ -77,16 +77,17 @@ Total waktu dari data masuk ke keputusan: **< 60 detik**.
 ┌─────────────────────────────────────────────────────────┐
 │                    SIGAP ENGINE                         │
 │                                                         │
-│  vulnerability.py ── Weighted score 0-100               │
-│    base (InaRisk statis)                                │
-│    + weather_boost (0-25, BMKG real-time)               │
-│    + alert_boost   (0-25, BMKG real-time)               │
-│    + field_boost   (0-30, laporan BPBD)                 │
+│  risk_model.py ── Model risiko 3-lapis (0-100)          │
+│    L1 Structural: Hazard×Vuln÷Capacity (UNDRR/InaRisk)  │
+│    L2 Trigger   : multiplier saturasi cuaca+alert+lapor │
+│    L3 Momentum  : Δskor/jam dari histori (tren)         │
 │                                                         │
-│  scoring.py ──── Orkestrasi semua komponen              │
-│  narrator.py ─── Gemini AI → narasi bahasa Indonesia    │
-│  baseline.py ─── InaRisk cache management (7 hari)     │
-│  wilayah.py ──── Katalog 90k+ kode wilayah Indonesia   │
+│  vulnerability.py ── Komponen skor + boost BMKG         │
+│  scoring.py ──── Orkestrasi 3-lapis + laporan lapangan  │
+│  score_history.py ─ Histori skor untuk momentum         │
+│  narrator.py ─── Gemini AI → narasi (profil kota + SOP) │
+│  baseline.py ─── InaRisk cache management (7 hari)      │
+│  wilayah.py ──── Katalog 90k+ kode wilayah Indonesia    │
 └──────────────────┬──────────────────────────────────────┘
                    │
                    ▼
@@ -139,27 +140,82 @@ Total waktu dari data masuk ke keputusan: **< 60 detik**.
 
 ## Vulnerability Score
 
-Skor 0–100 dihitung dari **5 komponen statis + 3 boost real-time**:
+SIGAP memakai **model risiko 3-lapis** berlandaskan kerangka risiko
+**UNDRR** (United Nations Office for Disaster Risk Reduction) — kerangka yang
+sama dipakai InaRisk BNPB. Bobotnya bukan ngarang: berasal dari standar
+internasional kebencanaan.
 
-### Komponen Statis (Base Score)
+```
+SKOR = Structural Risk (Layer 1)  ×  Trigger Multiplier (Layer 2)
+                                  +  konteks Momentum (Layer 3)
+```
 
-| Komponen | Bobot | Sumber | Normalisasi |
-|---|---|---|---|
-| Flood Hazard | 30% | InaRisk INDEKS_BAHAYA_BANJIR | 80% area = skor penuh |
-| Pop. Exposure | 25% | InaRisk INARISKPOP_2020 | 15.000 jiwa/km² = penuh |
-| Pop. Rentan | 25% | BPS: lansia 9.6% + balita 8.0% | 25% rentan = penuh |
-| Historis Banjir | 10% | BNPB DIBI 2000-2018 | 20 events = penuh |
-| Low Elevation | 10% | SRTM DEM | 50% area < 5m = penuh |
+Implementasi: `engine/risk_model.py` + `engine/score_history.py`.
 
-### Boost Real-time
+---
 
-| Boost | Sumber | Max | Trigger |
-|---|---|---|---|
-| Weather | BMKG prakiraan cuaca | +25 | > 100mm/12jam = +25, > 50mm = +15, > 20mm = +8 |
-| Alert | BMKG Nowcast severity | +25 | Extreme = +25, Severe = +15, Moderate = +8 |
-| Lapangan | Laporan BPBD (desa) | +30 | TMA Awas = +25, Siaga = +15, Waspada = +8 |
+### Layer 1 — Structural Risk (kerapuhan fundamental wilayah)
 
-> Total boost maksimum: **+30 poin** (di-cap agar tidak overflow).
+Formula resmi UNDRR:
+
+```
+Risk = (Hazard × Vulnerability) / Capacity
+```
+
+| Faktor | Komposisi | Sumber |
+|---|---|---|
+| **Hazard** | 55% bahaya banjir + 30% eksposur populasi + 15% elevasi rendah | InaRisk INDEKS_BAHAYA_BANJIR, INARISKPOP, SRTM |
+| **Vulnerability** | 70% populasi rentan (lansia+balita) + 30% rekam jejak historis | InaRisk + BPS + BNPB DIBI |
+| **Capacity** | Kemampuan daerah menanggulangi (jadi **pembagi**) | InaRisk INDEKS_KAPASITAS_2021 |
+
+**Kenapa Capacity sebagai pembagi?** Dua kota dengan bahaya sama tapi kapasitas
+BPBD/infrastruktur berbeda akan punya risiko berbeda. Kota dengan kapasitas kuat
+skornya **turun**. Ini insight yang tidak dimiliki model penjumlahan biasa.
+
+Hasil dinormalisasi ke 0–100 (pakai kurva akar agar adil, tidak menumpuk di bawah).
+
+---
+
+### Layer 2 — Dynamic Trigger (seberapa aktif ancaman HARI INI)
+
+Tiga pemicu real-time digabung jadi **satu multiplier 1.0–1.6** lewat kurva
+saturasi (tanh), lalu **mengalikan** Structural Risk — bukan menjumlah.
+
+| Pemicu | Sumber | Kontribusi |
+|---|---|---|
+| Weather | BMKG prakiraan cuaca 12 jam | Curah hujan → tekanan pemicu |
+| Alert | BMKG Nowcast severity | Extreme/Severe/Moderate/Minor |
+| Lapangan | Laporan BPBD per desa | TMA Awas/Siaga/Waspada |
+
+**Kenapa multiplikatif + saturasi, bukan aditif?**
+Model aditif lama (`base + boost`) punya cacat: hujan terus-menerus membuat skor
+**mentok 100** secara tidak realistis. Dengan multiplier saturasi, pemicu ekstrem
+*mendekati* maksimum tapi melandai:
+
+| Kondisi | Multiplier | Skor (contoh Semarang, structural 45) |
+|---|---|---|
+| Cerah | ×1.00 | 45.0 |
+| Hujan lebat | ×1.22 | 54.7 |
+| Ekstrem (hujan+alert+lapor AWAS) | ×1.57 | 70.7 |
+| Dobel ekstrem (absurd) | ×1.60 | 72.0 — **tetap melandai, tidak meledak** |
+
+---
+
+### Layer 3 — Momentum (ke mana situasi bergerak)
+
+Skor disimpan berkala (`engine/score_history.py`, maks 24 titik/kota, JSON ringan),
+lalu dihitung **Δskor per jam**. Ini membedakan dua situasi yang skornya sama:
+
+```
+Kota A: skor 60, NAIK +12/jam  → "⬆ Risiko naik cepat" → prioritas tinggi
+Kota B: skor 60, STABIL        → "→ Risiko stabil"      → terkendali
+```
+
+Saat momentum naik cepat (≥3/jam), sistem menambah tindakan prioritas:
+*"⚡ Antisipasi eskalasi 1-2 jam ke depan"* — decision-support sungguhan,
+bukan sekadar foto kondisi sekarang.
+
+---
 
 ### Kategori (Peraturan BNPB No. 2 Tahun 2024)
 
@@ -170,6 +226,8 @@ Skor 0–100 dihitung dari **5 komponen statis + 3 boost real-time**:
 | 50–75 | 🟠 SIAGA | Oranye | Aktifkan kesiapsiagaan |
 | 75–100 | 🔴 AWAS | Merah | Evakuasi segera |
 
+---
+
 ### Vulnerability Map per Kecamatan
 
 `GET /vulnerability-map/{city}` menghitung skor per kecamatan:
@@ -179,6 +237,17 @@ Skor 0–100 dihitung dari **5 komponen statis + 3 boost real-time**:
 
 Hasil: setiap kecamatan punya skor unik berdasarkan risiko lokal.
 Klik polygon di peta → lihat detail score, populasi estimasi, kategori.
+
+### Field respons `/vulnerability/{city}` yang relevan
+
+| Field | Arti |
+|---|---|
+| `score` | Skor akhir 0–100 (3 lapisan tergabung) |
+| `structural_score` | Layer 1 — risiko struktural UNDRR (base) |
+| `trigger_multiplier` | Layer 2 — pengali pemicu (1.0–1.6) |
+| `momentum_rate` | Layer 3 — Δskor/jam (+ naik, − turun) |
+| `momentum_label` | Teks tren siap tampil |
+| `risk_method` | Nama metode untuk transparansi |
 
 ---
 
@@ -396,8 +465,11 @@ sigap/
 │   └── main.py               # FastAPI v0.4.0, 16 endpoints, lifespan DB init
 │
 ├── engine/
-│   ├── vulnerability.py      # Core 0-100 scoring (5 statis + 2 dynamic boost)
-│   ├── scoring.py            # Orkestrasi: baseline + weather + alerts + field
+│   ├── risk_model.py         # Model risiko 3-lapis: UNDRR + saturasi + momentum
+│   ├── score_history.py      # Histori skor untuk momentum (Δskor/jam)
+│   ├── vulnerability.py      # Komponen skor + boost BMKG (dipakai Layer 1-2)
+│   ├── scoring.py            # Orkestrasi 3-lapis + laporan lapangan
+│   ├── city_profile.py       # Profil kota auto-generate untuk prompt Gemini
 │   ├── narrator.py           # Gemini AI narasi (AI Studio → Vertex → template)
 │   ├── baseline.py           # InaRisk cache management, 7 hari TTL (Postgres)
 │   ├── flood_report.py       # CRUD laporan lapangan, 12 jam window (Postgres)

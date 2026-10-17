@@ -827,8 +827,8 @@ Status aktual per Oktober 2026 (diverifikasi dari kode, bukan rencana).
 | Gemini (gratis AI Studio) | ✅ Selesai | Tidak butuh GCP billing lagi |
 | Login Google (frontend) | ⚠️ Parsial | `AuthContext.jsx` GSI, tapi tanpa verifikasi backend |
 | Auth di API backend | ❌ Belum | Semua endpoint terbuka, CORS `*` |
-| Deploy backend publik | 🔲 Belum | Belum ada Dockerfile/Cloud Run manifest |
-| Deploy frontend publik | 🔲 Belum | Belum ada vercel.json |
+| Deploy backend publik | ✅ Selesai | `Dockerfile` + Cloud Run deployment guide (`DEPLOYMENT.md`) |
+| Deploy frontend publik | ✅ Selesai | `frontend/Dockerfile` (Nginx reverse-proxy) + Cloud Run guide |
 
 ---
 

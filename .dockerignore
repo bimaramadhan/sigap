@@ -1,0 +1,29 @@
+.git
+.gitignore
+.venv
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
+*.swp
+*.swo
+
+# Ignore frontend build & node_modules
+frontend/
+node_modules/
+
+# Local env & credentials
+.env
+.env.*
+!.env.example
+*.log
+
+# Cache files
+data/cache/*
+!data/cache/.gitkeep

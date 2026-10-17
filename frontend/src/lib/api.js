@@ -20,7 +20,7 @@ import {
   clearMockReports,
 } from './mockData.js'
 
-const BASE_URL = '/api'
+const BASE_URL = import.meta.env.VITE_API_URL || '/api'
 const http     = axios.create({ baseURL: BASE_URL, timeout: 120000 })
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 const delay    = (ms = 600) => new Promise(r => setTimeout(r, ms))

@@ -1,6 +1,8 @@
 services:
   postgres:
     image: postgres:16
+    container_name: sigap-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: sigap
       POSTGRES_PASSWORD: sigap
@@ -9,6 +11,40 @@ services:
       - "5432:5432"
     volumes:
       - sigap_pg:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sigap-backend
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgresql://sigap:sigap@postgres:5432/sigap
+      - SKIP_DB=false
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data/cache:/app/data/cache
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sigap-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      - PORT=8080
+      - BACKEND_URL=http://backend:8080
+    ports:
+      - "3000:8080"
 
 volumes:
   sigap_pg:

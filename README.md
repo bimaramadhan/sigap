@@ -16,6 +16,7 @@
 - [Data Sources](#data-sources)
 - [Vulnerability Score](#vulnerability-score)
 - [Setup & Menjalankan](#setup--menjalankan)
+- [Deployment ke Google Cloud (Cloud Run)](DEPLOYMENT.md)
 - [API Endpoints](#api-endpoints)
 - [Struktur Project](#struktur-project)
 - [Status Komponen](#status-komponen)
@@ -372,6 +373,10 @@ docker compose up -d        # Postgres 16, kredensial sigap/sigap
 # set SKIP_DB=false di .env
 uvicorn api.main:app --reload --port 8080
 ```
+
+> 💡 **Menjalankan Full-Stack via Docker (PostgreSQL + Backend + Frontend):**
+> Jalankan `docker compose up --build`. Seluruh aplikasi akan aktif di `http://localhost:3000`.
+> Untuk panduan deployment ke production GCP, lihat [DEPLOYMENT.md](DEPLOYMENT.md).
 
 #### Opsi C — PostgreSQL install langsung (tanpa Docker)
 

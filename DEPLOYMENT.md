@@ -90,13 +90,18 @@ echo -n "MASUKKAN_GEMINI_API_KEY_ANDA" | gcloud secrets create sigap-gemini-key 
 echo -n "buat-token-acak-rahasia-disini" | gcloud secrets create sigap-refresh-token \
   --data-file=- \
   --replication-policy="automatic"
+
+# Database URL (e.g. postgresql://postgres:your_password@/postgres?host=/cloudsql/project-bb622a67-c523-4912-9f6:asia-southeast2:sigap)
+echo -n "DB-postgres-connection-string-url" | gcloud secrets create sigap-db-url \
+  --data-file=- \
+  --replication-policy="automatic"
 ```
 
 Beri izin Cloud Run Service Account untuk membaca secret ini:
 
 ```bash
 # Dapatkan nomor project
-PROJECT_NUMBER=$(gcloud projects describe $GCP_PROJECT_ID --format='value(projectNumber)')
+export PROJECT_NUMBER=$(gcloud projects describe $GCP_PROJECT_ID --format='value(projectNumber)')
 
 # Beri role Secret Manager Secret Accessor ke default Compute Engine service account
 gcloud secrets add-iam-policy-binding sigap-gemini-key \
@@ -104,6 +109,10 @@ gcloud secrets add-iam-policy-binding sigap-gemini-key \
   --role="roles/secretmanager.secretAccessor"
 
 gcloud secrets add-iam-policy-binding sigap-refresh-token \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+
+gcloud secrets add-iam-policy-binding sigap-db-url \
   --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
 ```
@@ -115,12 +124,23 @@ gcloud secrets add-iam-policy-binding sigap-refresh-token \
 Backend SIGAP menggunakan Python 3.11 dengan pustaka geospasial (`geopandas`, `shapely`, `pyproj`). Alokasikan minimal **2 vCPU** dan **2 GiB RAM** untuk pemrosesan geospasial.
 
 ### 4.1 Build Image Container
-Gunakan Cloud Build untuk build image secara cloud:
-
+#### Otentikasi Docker ke GCP Artifact Registry
 ```bash
-gcloud builds submit \
-  --tag ${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/sigap-repo/sigap-backend:v1 \
-  .
+gcloud auth configure-docker ${GCP_REGION}-docker.pkg.dev
+
+gcloud auth print-access-token | docker login \
+  -u oauth2accesstoken \
+  --password-stdin https://${GCP_REGION}-docker.pkg.dev
+```
+
+#### Build image secara lokal
+```bash
+docker build -t ${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/sigap-repo/sigap-backend:v1 .
+```
+
+#### Push image ke Artifact Registry
+```bash
+docker push ${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/sigap-repo/sigap-backend:v1
 ```
 
 ### 4.2 Deploy ke Cloud Run
@@ -136,8 +156,9 @@ gcloud run deploy sigap-backend \
   --timeout 180 \
   --min-instances 0 \
   --max-instances 10 \
-  --set-env-vars="SKIP_DB=true,DEMO_MODE=false,GEMINI_MODEL=gemini-3.5-flash,DEMO_CITY=33.74" \
-  --set-secrets="GEMINI_API_KEY=sigap-gemini-key:latest,REFRESH_TOKEN=sigap-refresh-token:latest"
+  --set-env-vars="SKIP_DB=false,DEMO_MODE=false,GEMINI_MODEL=gemini-3.5-flash-lite,DEMO_CITY=33.74" \
+  --set-secrets="GEMINI_API_KEY=sigap-gemini-key:latest,REFRESH_TOKEN=sigap-refresh-token:latest,DATABASE_URL=sigap-db-url:latest" \
+  --add-cloudsql-instances=project-bb622a67-c523-4912-9f6:asia-southeast2:sigap
 ```
 
 > **Catatan Mode Database**:
@@ -161,9 +182,14 @@ echo "Target Backend URL: $BACKEND_URL"
 
 ### 5.2 Build Image Frontend
 
+#### Build image secara lokal
 ```bash
-gcloud builds submit frontend \
-  --tag ${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/sigap-repo/sigap-frontend:v1
+docker build -t ${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/sigap-repo/sigap-frontend:v1 .
+```
+
+#### Push image ke Artifact Registry
+```bash
+docker push ${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/sigap-repo/sigap-frontend:v1
 ```
 
 ### 5.3 Deploy Frontend ke Cloud Run

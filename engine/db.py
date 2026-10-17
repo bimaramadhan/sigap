@@ -229,7 +229,7 @@ def save_baseline(
             ON CONFLICT (kab_kode) DO UPDATE SET
                 features_json = EXCLUDED.features_json,
                 base_score = EXCLUDED.base_score,
-                polygons_json = EXCLUDED.polygons_json,
+                polygons_json = COALESCE(EXCLUDED.polygons_json, inarisk_baselines.polygons_json),
                 fetched_at = EXCLUDED.fetched_at,
                 source = EXCLUDED.source
             """,
@@ -251,6 +251,31 @@ def save_baseline(
         "fetched_at": now,
         "source": source,
     }
+
+
+def save_polygons(kab_kode: str, polygons: dict) -> None:
+    """
+    Simpan atau perbarui data polygon GeoJSON ke inarisk_baselines.
+    Jika baris kab_kode belum ada, dibuat baris baru.
+    Jika sudah ada, kolom polygons_json diperbarui tanpa merusak features_json / base_score.
+    """
+    from engine.wilayah import canonical_kab
+
+    kab = canonical_kab(kab_kode) or kab_kode
+    now = datetime.now(timezone.utc)
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO inarisk_baselines (
+                kab_kode, features_json, base_score, polygons_json, fetched_at, source
+            ) VALUES (%s, '{}'::jsonb, 0.0, %s, %s, 'InaRisk BNPB GIS Service')
+            ON CONFLICT (kab_kode) DO UPDATE SET
+                polygons_json = EXCLUDED.polygons_json
+            """,
+            (kab, Jsonb(polygons), now),
+        )
+        conn.commit()
+    logger.success(f"Polygon {kab} berhasil disimpan ke database inarisk_baselines")
 
 
 def list_stale_baselines(limit: int) -> list[str]:

@@ -723,8 +723,12 @@ def get_vulnerability_map(city: str):
             import json as _json
             with open(_cache_file, encoding="utf-8") as f:
                 cached = _json.load(f)
-            logger.debug(f"  vuln_map cache hit: {city} (age {age:.0f}s)")
-            return cached
+            # Hanya pakai cache jika memang ada features di dalamnya
+            if cached.get("features"):
+                logger.debug(f"  vuln_map cache hit: {city} (age {age:.0f}s)")
+                return cached
+            else:
+                logger.debug(f"  vuln_map cache miss (kosong): {city}, re-compute")
 
     try:
         from engine.scoring       import score_city

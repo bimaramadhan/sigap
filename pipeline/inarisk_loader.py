@@ -39,7 +39,7 @@ load_dotenv()
 BASE_URL   = "https://gis.bnpb.go.id/server/rest/services/inarisk"
 CACHE_DIR  = Path("data/cache")
 CACHE_TTL  = 24 * 3600   # 24 jam — InaRisk data statis, tidak perlu sering refresh
-TIMEOUT    = 20           # Server InaRisk kadang lambat
+TIMEOUT    = 8           # Timeout wajar untuk GIS ImageServer (normalnya 0.8-1.5s)
 
 HEADERS = {
     "User-Agent":  "SIGAP-FloodResponseSystem/1.0",
@@ -252,14 +252,7 @@ def _chunk_points(points: list, chunk_size: int = 50) -> list[list]:
 
 
 # ── ArcGIS REST API ───────────────────────────────────────────────────────────
-@retry(stop=stop_after_attempt(2), wait=wait_exponential(min=2, max=8))
-def _get_samples(layer_name: str, points: list[list[float]]) -> list[dict]:
-    """
-    Query getSamples endpoint untuk satu chunk titik koordinat.
-
-    Returns:
-        List of sample dicts dengan keys: locationId, value, location
-    """
+def _fetch_samples_http(layer_name: str, points: list[list[float]], timeout: float = TIMEOUT) -> list[dict]:
     geometry = {
         "points": points,
         "spatialReference": {"wkid": 4326},
@@ -272,7 +265,7 @@ def _get_samples(layer_name: str, points: list[list[float]]) -> list[dict]:
         "f":            "json",
     }
 
-    resp = requests.get(url, params=params, headers=HEADERS, timeout=TIMEOUT)
+    resp = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
     resp.raise_for_status()
     data = resp.json()
 
@@ -282,7 +275,19 @@ def _get_samples(layer_name: str, points: list[list[float]]) -> list[dict]:
     return data.get("samples", [])
 
 
-def _query_layer_grid(layer_name: str, bbox: list[float], step: float = 0.025) -> dict:
+@retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1, max=3))
+def _get_samples(layer_name: str, points: list[list[float]], timeout: float = TIMEOUT) -> list[dict]:
+    """Query getSamples endpoint dengan retry."""
+    return _fetch_samples_http(layer_name, points, timeout=timeout)
+
+
+def _query_layer_grid(
+    layer_name: str,
+    bbox: list[float],
+    step: float = 0.025,
+    timeout: float = TIMEOUT,
+    retries: bool = True,
+) -> dict:
     """
     Query satu layer InaRisk dengan sampling grid di dalam bbox.
 
@@ -297,7 +302,10 @@ def _query_layer_grid(layer_name: str, bbox: list[float], step: float = 0.025) -
 
     for i, chunk in enumerate(chunks):
         try:
-            samples = _get_samples(layer_name, chunk)
+            if retries:
+                samples = _get_samples(layer_name, chunk, timeout=timeout)
+            else:
+                samples = _fetch_samples_http(layer_name, chunk, timeout=timeout)
             for s in samples:
                 raw_val = s.get("value", "")
                 if raw_val != "" and raw_val is not None:
@@ -305,7 +313,7 @@ def _query_layer_grid(layer_name: str, bbox: list[float], step: float = 0.025) -
                         all_vals.append(float(raw_val))
                     except (ValueError, TypeError):
                         pass
-            time.sleep(0.3)  # Gentle rate limiting — server InaRisk sensitif
+            time.sleep(0.15)  # Gentle rate limiting
         except Exception as e:
             logger.warning(f"    Chunk {i+1}/{len(chunks)} gagal: {e}")
             continue
@@ -422,88 +430,102 @@ def get_all_features(
     logger.info(f"  Querying InaRisk untuk {cfg['label']}...")
     results = {"city": city, "config": cfg}
 
-    # ── Layer 1: Flood Hazard (paling penting, query dulu) ────────────────────
-    logger.info("  [1/4] INDEKS_BAHAYA_BANJIR...")
-    try:
-        hazard = _query_layer_grid("INDEKS_BAHAYA_BANJIR", bbox, step=0.02)
-        if hazard.get("n_samples", 0) == 0:
-            raise ValueError("tidak ada sampel bahaya")
-        hazard["high_ratio"]   = _compute_flood_ratio(hazard, threshold=0.6)
-        hazard["medium_ratio"] = _compute_flood_ratio(hazard, threshold=0.3)
-        hazard["_source"]      = "InaRisk BNPB — INDEKS_BAHAYA_BANJIR"
-        results["flood_hazard"] = hazard
-        logger.success(f"    Hazard mean={hazard['mean']:.3f}, high_ratio={hazard['high_ratio']:.1%}")
-    except Exception as e:
-        logger.warning(f"    Flood hazard gagal: {e} → pakai sample")
-        results["flood_hazard"] = {**_sample_block(city)["flood_hazard"], "_fallback": True}
+    # ── Query 6 layer InaRisk secara paralel dengan ThreadPoolExecutor ────────
+    import concurrent.futures
 
-    # ── Layer 2: Capacity (biasanya cepat) ────────────────────────────────────
-    logger.info("  [2/4] INDEKS_KAPASITAS_2021...")
-    try:
-        cap = _query_layer_grid("INDEKS_KAPASITAS_2021", bbox, step=0.05)
-        cap["_source"] = "InaRisk BNPB — INDEKS_KAPASITAS_2021"
-        results["capacity"] = cap
-        logger.success(f"    Capacity mean={cap['mean']:.3f}")
-    except Exception as e:
-        logger.warning(f"    Capacity gagal: {e} → pakai sample")
-        results["capacity"] = {**_sample_block(city)["capacity"], "_fallback": True}
+    def _get_hazard():
+        logger.info("  [1/6] INDEKS_BAHAYA_BANJIR...")
+        try:
+            hazard = _query_layer_grid("INDEKS_BAHAYA_BANJIR", bbox, step=0.02)
+            if hazard.get("n_samples", 0) == 0:
+                raise ValueError("tidak ada sampel bahaya")
+            hazard["high_ratio"]   = _compute_flood_ratio(hazard, threshold=0.6)
+            hazard["medium_ratio"] = _compute_flood_ratio(hazard, threshold=0.3)
+            hazard["_source"]      = "InaRisk BNPB — INDEKS_BAHAYA_BANJIR"
+            logger.success(f"    Hazard mean={hazard['mean']:.3f}, high_ratio={hazard['high_ratio']:.1%}")
+            return hazard
+        except Exception as e:
+            logger.warning(f"    Flood hazard gagal: {e} → pakai sample")
+            return {**_sample_block(city)["flood_hazard"], "_fallback": True}
 
-    # ── Layer 3: Population ───────────────────────────────────────────────────
-    logger.info("  [3/4] INARISKPOP_2020...")
-    try:
-        pop = _query_layer_grid("INARISKPOP_2020", bbox, step=0.02)
-        pop["total_est"] = _estimate_population(pop, bbox)
-        pop["_source"]   = "InaRisk BNPB — INARISKPOP_2020"
+    def _get_capacity():
+        logger.info("  [2/6] INDEKS_KAPASITAS_2021...")
+        try:
+            cap = _query_layer_grid("INDEKS_KAPASITAS_2021", bbox, step=0.05)
+            cap["_source"] = "InaRisk BNPB — INDEKS_KAPASITAS_2021"
+            logger.success(f"    Capacity mean={cap['mean']:.3f}")
+            return cap
+        except Exception as e:
+            logger.warning(f"    Capacity gagal: {e} → pakai sample")
+            return {**_sample_block(city)["capacity"], "_fallback": True}
 
-        # Validasi: kalau query berhasil tapi hasilnya 0 atau tanpa sampel,
-        # pakai sample data (InaRisk kadang return NoData untuk seluruh area)
-        if pop.get("n_samples", 0) == 0 or pop.get("total_est", 0) == 0:
-            logger.warning(f"    Population query returned 0 — pakai sample data")
-            samp = _sample_block(city).get("population", {})
-            if samp:
-                pop.update(samp)
-                pop["_fallback"] = True
-            else:
-                raise ValueError("No sample data available")
+    def _get_population():
+        logger.info("  [3/6] INARISKPOP_2020...")
+        try:
+            pop = _query_layer_grid("INARISKPOP_2020", bbox, step=0.02)
+            pop["total_est"] = _estimate_population(pop, bbox)
+            pop["_source"]   = "InaRisk BNPB — INARISKPOP_2020"
+            if pop.get("n_samples", 0) == 0 or pop.get("total_est", 0) == 0:
+                logger.warning("    Population query returned 0 — pakai sample data")
+                samp = _sample_block(city).get("population", {})
+                if samp:
+                    pop.update(samp)
+                    pop["_fallback"] = True
+                else:
+                    raise ValueError("No sample data available")
+            logger.success(f"    Population total_est={pop['total_est']:,}")
+            return pop
+        except Exception as e:
+            logger.warning(f"    Population gagal: {e} → pakai sample")
+            return {**_sample_block(city)["population"], "_fallback": True}
 
-        results["population"] = pop
-        logger.success(f"    Population total_est={pop['total_est']:,}")
-    except Exception as e:
-        logger.warning(f"    Population gagal: {e} → pakai sample")
-        results["population"] = {**_sample_block(city)["population"], "_fallback": True}
+    def _get_vulnerability():
+        logger.info("  [4/6] INDEKS_KERENTANAN_BANJIR...")
+        try:
+            vuln = _query_layer_grid("INDEKS_KERENTANAN_BANJIR", bbox, step=0.04, timeout=4.0, retries=False)
+            vuln["_source"] = "InaRisk BNPB — INDEKS_KERENTANAN_BANJIR"
+            logger.success(f"    Vulnerability mean={vuln['mean']:.3f}")
+            return vuln
+        except Exception as e:
+            logger.warning(f"    Vulnerability gagal: {e} → pakai sample")
+            return {**_sample_block(city)["vulnerability"], "_fallback": True}
 
-    # ── Layer 4: Vulnerability (paling lambat, terakhir) ─────────────────────
-    logger.info("  [4/5] INDEKS_KERENTANAN_BANJIR (bisa lambat)...")
-    try:
-        vuln = _query_layer_grid("INDEKS_KERENTANAN_BANJIR", bbox, step=0.03)
-        vuln["_source"] = "InaRisk BNPB — INDEKS_KERENTANAN_BANJIR"
-        results["vulnerability"] = vuln
-        logger.success(f"    Vulnerability mean={vuln['mean']:.3f}")
-    except Exception as e:
-        logger.warning(f"    Vulnerability gagal: {e} → pakai sample")
-        results["vulnerability"] = {**_sample_block(city)["vulnerability"], "_fallback": True}
+    def _get_flood_risk():
+        logger.info("  [5/6] layer_risiko_banjir (indeks risiko FINAL BNPB)...")
+        try:
+            flood_risk = _query_layer_grid("layer_risiko_banjir", bbox, step=0.02)
+            flood_risk["_source"] = "InaRisk BNPB — layer_risiko_banjir"
+            logger.success(f"    Flood risk (BNPB) mean={flood_risk['mean']:.3f}")
+            return flood_risk
+        except Exception as e:
+            logger.warning(f"    Flood risk gagal: {e} → pakai computed value")
+            return {"mean": 0.0, "n_samples": 0, "_fallback": True}
 
-    # ── Layer 5: Flood Risk (indeks risiko final dari BNPB) ───────────────────
-    logger.info("  [5/6] layer_risiko_banjir (indeks risiko FINAL BNPB)...")
-    try:
-        flood_risk = _query_layer_grid("layer_risiko_banjir", bbox, step=0.02)
-        flood_risk["_source"] = "InaRisk BNPB — layer_risiko_banjir"
-        results["flood_risk"] = flood_risk
-        logger.success(f"    Flood risk (BNPB) mean={flood_risk['mean']:.3f}")
-    except Exception as e:
-        logger.warning(f"    Flood risk gagal: {e} → pakai computed value")
-        results["flood_risk"] = {"mean": 0.0, "n_samples": 0, "_fallback": True}
+    def _get_slr():
+        logger.info("  [6/6] SLR (Sea Level Rise index, 30m)...")
+        try:
+            slr = _query_layer_grid("SLR", bbox, step=0.02)
+            slr["_source"] = "InaRisk BNPB — SLR (Sea Level Rise)"
+            logger.success(f"    SLR mean={slr['mean']:.3f} (1.0 = risiko SLR maksimum)")
+            return slr
+        except Exception as e:
+            logger.warning(f"    SLR gagal: {e}")
+            return {"mean": 0.0, "n_samples": 0, "_fallback": True}
 
-    # ── Layer 6: Sea Level Rise (relevan untuk kota pesisir) ──────────────────
-    logger.info("  [6/6] SLR (Sea Level Rise index, 30m)...")
-    try:
-        slr = _query_layer_grid("SLR", bbox, step=0.02)
-        slr["_source"] = "InaRisk BNPB — SLR (Sea Level Rise)"
-        results["sea_level_rise"] = slr
-        logger.success(f"    SLR mean={slr['mean']:.3f} (1.0 = risiko SLR maksimum)")
-    except Exception as e:
-        logger.warning(f"    SLR gagal: {e}")
-        results["sea_level_rise"] = {"mean": 0.0, "n_samples": 0, "_fallback": True}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+        f_hazard = executor.submit(_get_hazard)
+        f_cap    = executor.submit(_get_capacity)
+        f_pop    = executor.submit(_get_population)
+        f_vuln   = executor.submit(_get_vulnerability)
+        f_risk   = executor.submit(_get_flood_risk)
+        f_slr    = executor.submit(_get_slr)
+
+        results["flood_hazard"]   = f_hazard.result()
+        results["capacity"]       = f_cap.result()
+        results["population"]     = f_pop.result()
+        results["vulnerability"]  = f_vuln.result()
+        results["flood_risk"]     = f_risk.result()
+        results["sea_level_rise"] = f_slr.result()
 
     # ── Hitung metrik turunan ─────────────────────────────────────────────────
     hazard_vals = results["flood_hazard"]

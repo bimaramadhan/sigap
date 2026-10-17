@@ -255,6 +255,12 @@ def get_flood_polygons(city: str, force_refresh: bool = False, bbox: list | None
         cached = _load_cache(city)
         if cached:
             logger.info(f"  Polygon cache hit: {city} ({len(cached.get('features', []))} kecamatan)")
+            try:
+                from engine.db import db_available, save_polygons
+                if db_available():
+                    save_polygons(city, cached)
+            except Exception as exc:
+                logger.debug(f"Simpan polygon cache ke DB dilewati: {exc}")
             return cached
     logger.info(f"  Fetching kecamatan polygons untuk {city}...")
 
@@ -396,6 +402,12 @@ def get_flood_polygons(city: str, force_refresh: bool = False, bbox: list | None
     }
 
     _save_cache(city, geojson)
+    try:
+        from engine.db import db_available, save_polygons
+        if db_available():
+            save_polygons(city, geojson)
+    except Exception as exc:
+        logger.debug(f"Simpan polygon live ke DB dilewati: {exc}")
     logger.success(
         f"  Polygons {city}: {len(geojson_features)} kecamatan | "
         f"very_high={geojson['stats']['very_high_count']} | "

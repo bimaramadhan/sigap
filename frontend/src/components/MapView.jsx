@@ -343,16 +343,40 @@ export default function MapView({ selectedCity, cityName, cityMeta }) {
   // Fallback: flood polygon biasa (hazard-colored)
   const { polygons: floodPolygons, loading: fallbackLoading } = useFloodPolygons(selectedCity)
 
-  // Fetch vulnerability map per kota
+  // Fetch vulnerability map per kota, dengan retry jika polygon belum tersedia
   useEffect(() => {
     if (!selectedCity) return
     setSelectedKec(null)
     setVulnMap(null)
     setVulnLoading(true)
 
-    getVulnerabilityMap(selectedCity)
-      .then(data => { setVulnMap(data); setVulnLoading(false) })
-      .catch(() => { setVulnLoading(false) })
+    let cancelled = false
+    let retryCount = 0
+    const MAX_RETRIES = 5
+    const RETRY_INTERVAL = 5000 // 5 detik
+
+    const fetchVulnMap = () => {
+      getVulnerabilityMap(selectedCity)
+        .then(data => {
+          if (cancelled) return
+          if (data && data.features && data.features.length > 0) {
+            setVulnMap(data)
+            setVulnLoading(false)
+          } else if (retryCount < MAX_RETRIES) {
+            // Polygon belum ada di backend, coba lagi setelah interval
+            retryCount++
+            setTimeout(fetchVulnMap, RETRY_INTERVAL)
+          } else {
+            setVulnLoading(false)
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setVulnLoading(false)
+        })
+    }
+
+    fetchVulnMap()
+    return () => { cancelled = true }
   }, [selectedCity])
 
   // Gunakan vulnMap kalau ada, fallback ke floodPolygons, fallback ke mock

@@ -18,12 +18,15 @@ from engine.db import (
     list_stale_baselines,
     load_baseline,
     save_baseline,
+    save_polygons,
 )
 from engine.places import resolve_bbox
 from engine.wilayah import canonical_kab, lookup_kab
 
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
+_polygon_locks: dict[str, threading.Lock] = {}
+_polygon_locks_guard = threading.Lock()
 
 
 def _city_lock(kab_kode: str) -> threading.Lock:
@@ -32,6 +35,15 @@ def _city_lock(kab_kode: str) -> threading.Lock:
         if lock is None:
             lock = threading.Lock()
             _locks[kab_kode] = lock
+        return lock
+
+
+def _polygon_lock(kab_kode: str) -> threading.Lock:
+    with _polygon_locks_guard:
+        lock = _polygon_locks.get(kab_kode)
+        if lock is None:
+            lock = threading.Lock()
+            _polygon_locks[kab_kode] = lock
         return lock
 
 
@@ -88,12 +100,27 @@ def _fetch_and_store(kab_kode: str) -> dict:
     base = calculate(kab_kode, features)
     source = "fallback" if features.get("_is_sample") else (features.get("_source") or "InaRisk BNPB")
 
+    # Cek apakah polygon sudah ada di DB agar tidak perlu re-fetch
     polygons = None
-    try:
-        from pipeline.inarisk_polygon import get_flood_polygons
-        polygons = get_flood_polygons(kab_kode, force_refresh=True, bbox=bbox)
-    except Exception as exc:
-        logger.warning(f"Polygon {kab_kode} gagal, baseline fitur tetap disimpan: {exc}")
+    existing = load_baseline(kab_kode, with_polygons=True)
+    if existing and existing.get("polygons_json"):
+        polygons = existing["polygons_json"]
+        logger.debug(f"Polygon {kab_kode} diambil dari DB (sudah ada)")
+    else:
+        try:
+            from pipeline.inarisk_polygon import get_flood_polygons
+            polygons = get_flood_polygons(kab_kode, force_refresh=False, bbox=bbox)
+        except Exception as exc:
+            logger.warning(f"Polygon live {kab_kode} gagal: {exc}")
+
+        if not polygons:
+            try:
+                from pipeline.inarisk_polygon import _load_cache
+                polygons = _load_cache(kab_kode)
+                if polygons:
+                    logger.info(f"Menggunakan polygon file cache untuk {kab_kode}")
+            except Exception:
+                pass
 
     saved = save_baseline(
         kab_kode=kab_kode,
@@ -123,8 +150,19 @@ def ensure_baseline(city: str, force: bool = False) -> dict:
 
     with _city_lock(kab):
         if not force:
-            current = load_baseline(kab, with_polygons=False)
+            current = load_baseline(kab, with_polygons=True)
             if current and _row_is_fresh(current):
+                # Jika data baseline ada tapi polygon belum tersimpan di DB, lengkapi polygon
+                if not current.get("polygons_json"):
+                    try:
+                        bbox = resolve_bbox(kab)
+                        from pipeline.inarisk_polygon import get_flood_polygons
+                        poly = get_flood_polygons(kab, force_refresh=False, bbox=bbox)
+                        if poly:
+                            save_polygons(kab, poly)
+                            current["polygons_json"] = poly
+                    except Exception as exc:
+                        logger.warning(f"Pelengkapan polygon {kab} ke DB gagal: {exc}")
                 return _attach_meta(current)
         return _fetch_and_store(kab)
 
@@ -181,25 +219,39 @@ def get_polygons(city: str, force: bool = False) -> dict:
     if not kab:
         raise ValueError(f"Kab/kota '{city}' tidak ada di katalog wilayah")
 
+    bbox = resolve_bbox(kab)
+    from pipeline.inarisk_polygon import get_flood_polygons
+
     # Fallback tanpa DB → query inarisk_polygon langsung (punya file cache sendiri)
     if not db_available():
-        from pipeline.inarisk_polygon import get_flood_polygons
-        bbox = resolve_bbox(kab)
-        return get_flood_polygons(kab, bbox=bbox)
+        return get_flood_polygons(kab, force_refresh=force, bbox=bbox)
 
+    # 1. Cek dulu apakah polygon sudah ada di database dan masih fresh
     cached = load_baseline(kab, with_polygons=True)
     fresh = bool(cached) and baseline_is_fresh(cached["fetched_at"])
     if fresh and cached.get("polygons_json") and not force:
         return cached["polygons_json"]
 
-    if force or not fresh:
-        ensure_baseline(kab, force=force or not fresh)
-        cached = load_baseline(kab, with_polygons=True)
+    # 2. Jika polygon belum ada di DB (atau force=True):
+    # Langsung ambil polygon dari InaRisk dan simpan ke inarisk_baselines!
+    # Menggunakan _polygon_lock khusus agar tidak terblokir oleh komputasi fitur kerentanan.
+    with _polygon_lock(kab):
+        # Double check cache setelah mendapatkan lock
+        if not force:
+            cached = load_baseline(kab, with_polygons=True)
+            if cached and cached.get("polygons_json") and baseline_is_fresh(cached["fetched_at"]):
+                return cached["polygons_json"]
 
-    polygons = (cached or {}).get("polygons_json")
-    if not polygons:
-        raise ValueError(f"Polygon kecamatan untuk {kab} belum tersedia")
-    return polygons
+        logger.info(f"Mengambil polygon InaRisk langsung untuk {kab}...")
+        polygons = get_flood_polygons(kab, force_refresh=force, bbox=bbox)
+        if polygons:
+            save_polygons(kab, polygons)
+            return polygons
+
+        polygons = (cached or {}).get("polygons_json")
+        if not polygons:
+            raise ValueError(f"Polygon kecamatan untuk {kab} belum tersedia")
+        return polygons
 
 
 def refresh_stale(limit: int = 5) -> dict:

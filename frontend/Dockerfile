@@ -27,10 +27,12 @@ FROM nginx:alpine
 # Salin build output ke direktori web root Nginx
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Salin template config dan entrypoint
+# Salin template config dan entrypoint script
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+
+# Normalisasi line endings (CRLF -> LF) agar tidak error di Windows dan beri izin eksekusi
+RUN sed -i 's/\r$//' /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh
 
 # Port default untuk Google Cloud Run
 ENV PORT=8080

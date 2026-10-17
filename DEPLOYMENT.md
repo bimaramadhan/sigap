@@ -103,6 +103,10 @@ Beri izin Cloud Run Service Account untuk membaca secret ini:
 # Dapatkan nomor project
 export PROJECT_NUMBER=$(gcloud projects describe $GCP_PROJECT_ID --format='value(projectNumber)')
 
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+  --member="serviceAccount:YOUR_SERVICE_ACCOUNT_EMAIL" \
+  --role="roles/cloudsql.client"
+
 # Beri role Secret Manager Secret Accessor ke default Compute Engine service account
 gcloud secrets add-iam-policy-binding sigap-gemini-key \
   --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \

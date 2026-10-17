@@ -25,8 +25,7 @@ services:
       - DATABASE_URL=postgresql://sigap:sigap@postgres:5432/sigap
       - SKIP_DB=false
     env_file:
-      - path: .env
-        required: false
+      - .env
     ports:
       - "8080:8080"
     volumes:

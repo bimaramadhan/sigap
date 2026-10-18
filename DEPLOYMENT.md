@@ -1,55 +1,55 @@
-# Panduan Deployment SIGAP ke Google Cloud Platform (GCP)
+# SIGAP Deployment Guide to Google Cloud Platform (GCP)
 
-Panduan ini menjelaskan arsitektur dan langkah-langkah *end-to-end* untuk men-deploy backend (**FastAPI**) dan frontend (**React + Vite + Nginx**) aplikasi **SIGAP** ke **Google Cloud Run**.
+This guide describes the architecture and end-to-end steps to deploy the **SIGAP** application's backend (**FastAPI**) and frontend (**React + Vite + Nginx**) to **Google Cloud Run**.
 
 ---
 
-## 🏗️ Arsitektur Deployment
+## 🏗️ Deployment Architecture
 
 ```mermaid
 flowchart TD
-    User([Pengguna / Koordinator BPBD]) -->|HTTPS| Frontend[Cloud Run: Frontend Nginx]
+    User([User / BPBD Coordinator]) -->|HTTPS| Frontend[Cloud Run: Frontend Nginx]
     Frontend -->|Reverse Proxy /api/*| Backend[Cloud Run: Backend FastAPI]
     Backend --> Secrets[Google Secret Manager\n- GEMINI_API_KEY]
-    Backend -->|Opsional: Cloud SQL Auth Proxy| CloudSQL[(Cloud SQL PostgreSQL)]
+    Backend -->|Optional: Cloud SQL Auth Proxy| CloudSQL[(Cloud SQL PostgreSQL)]
     Backend -->|Outbound HTTPS| BMKG[BMKG & InaRisk Public API]
     Backend -->|Outbound HTTPS| AIStudio[Google AI Studio Gemini API]
     Scheduler[Cloud Scheduler\nCRON Weekly] -.->|POST /internal/refresh-baselines| Backend
 ```
 
-### Mengapa Cloud Run?
-1. **Serverless & Scale-to-Zero**: Hemat biaya saat tidak ada bencana/traffic, instan aktif saat ada request.
-2. **Built-in HTTPS & Custom Domain**: Sertifikat SSL otomatis dikelola Google Cloud.
-3. **Standar Port Fleksibel**: Otomatis menginjeksi variabel environment `$PORT` (default: 8080).
+### Why Cloud Run?
+1. **Serverless & Scale-to-Zero**: Cost-effective when there is no disaster/traffic, instantly active upon request.
+2. **Built-in HTTPS & Custom Domain**: SSL certificates are automatically managed by Google Cloud.
+3. **Flexible Port Standard**: Automatically injects the `$PORT` environment variable (default: 8080).
 
 ---
 
-## 📋 Prasyarat (Prerequisites)
+## 📋 Prerequisites
 
-1. Akun Google Cloud dengan billing aktif.
-2. [Google Cloud SDK (`gcloud` CLI)](https://cloud.google.com/sdk/docs/install) telah terpasang di komputer lokal.
-3. [Docker Desktop](https://www.docker.com/products/docker-desktop/) telah terpasang.
-4. Gemini API Key dari [Google AI Studio](https://aistudio.google.com).
+1. A Google Cloud account with active billing.
+2. [Google Cloud SDK (`gcloud` CLI)](https://cloud.google.com/sdk/docs/install) installed on your local machine.
+3. [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed.
+4. Gemini API Key from [Google AI Studio](https://aistudio.google.com).
 
 ---
 
-## 🚀 Langkah 1: Inisialisasi gcloud & Aktifkan API
+## 🚀 Step 1: Initialize gcloud & Enable APIs
 
-Buka terminal dan jalankan konfigurasi awal:
+Open your terminal and run the initial configuration:
 
 ```bash
-# 1. Login ke akun GCP
+# 1. Log in to your GCP account
 gcloud auth login
 
-# 2. Tentukan project ID
+# 2. Set your project ID
 export GCP_PROJECT_ID="your-project-id"
 gcloud config set project $GCP_PROJECT_ID
 
-# 3. Tentukan region default (disarankan asia-southeast2 / Jakarta untuk latensi terendah)
+# 3. Set the default region (asia-southeast2 / Jakarta is recommended for lowest latency)
 export GCP_REGION="asia-southeast2"
 gcloud config set run/region $GCP_REGION
 
-# 4. Aktifkan service API yang dibutuhkan
+# 4. Enable required API services
 gcloud services enable \
   run.googleapis.com \
   artifactregistry.googleapis.com \
@@ -59,35 +59,35 @@ gcloud services enable \
 
 ---
 
-## 📦 Langkah 2: Buat Artifact Registry Repository
+## 📦 Step 2: Create an Artifact Registry Repository
 
-Artifact Registry digunakan untuk menyimpan image container Docker backend dan frontend.
+Artifact Registry is used to store Docker container images for both backend and frontend.
 
 ```bash
-# Buat repositori Docker
+# Create a Docker repository
 gcloud artifacts repositories create sigap-repo \
   --repository-format=docker \
   --location=$GCP_REGION \
-  --description="Repositori Docker untuk SIGAP"
+  --description="Docker Repository for SIGAP"
 
-# Konfigurasikan otentikasi Docker lokal ke Artifact Registry
+# Configure local Docker authentication to Artifact Registry
 gcloud auth configure-docker ${GCP_REGION}-docker.pkg.dev
 ```
 
 ---
 
-## 🔑 Langkah 3: Simpan Kredensial Sensitif di Secret Manager
+## 🔑 Step 3: Store Sensitive Credentials in Secret Manager
 
-Jangan menyimpan API key di environment plain-text atau commit ke git. Simpan di Google Secret Manager:
+Do not store API keys in plain-text environment variables or commit them to git. Store them in Google Secret Manager:
 
 ```bash
-# Simpan Gemini API Key
-echo -n "MASUKKAN_GEMINI_API_KEY_ANDA" | gcloud secrets create sigap-gemini-key \
+# Store Gemini API Key
+echo -n "ENTER_YOUR_GEMINI_API_KEY" | gcloud secrets create sigap-gemini-key \
   --data-file=- \
   --replication-policy="automatic"
 
-# (Opsional) Token untuk Cloud Scheduler auto-refresh baseline
-echo -n "buat-token-acak-rahasia-disini" | gcloud secrets create sigap-refresh-token \
+# (Optional) Token for Cloud Scheduler baseline auto-refresh
+echo -n "create-a-secret-random-token-here" | gcloud secrets create sigap-refresh-token \
   --data-file=- \
   --replication-policy="automatic"
 
@@ -97,17 +97,17 @@ echo -n "DB-postgres-connection-string-url" | gcloud secrets create sigap-db-url
   --replication-policy="automatic"
 ```
 
-Beri izin Cloud Run Service Account untuk membaca secret ini:
+Grant permissions to the Cloud Run Service Account to access these secrets:
 
 ```bash
-# Dapatkan nomor project
+# Get project number
 export PROJECT_NUMBER=$(gcloud projects describe $GCP_PROJECT_ID --format='value(projectNumber)')
 
 gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
   --member="serviceAccount:YOUR_SERVICE_ACCOUNT_EMAIL" \
   --role="roles/cloudsql.client"
 
-# Beri role Secret Manager Secret Accessor ke default Compute Engine service account
+# Grant Secret Manager Secret Accessor role to default Compute Engine service account
 gcloud secrets add-iam-policy-binding sigap-gemini-key \
   --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
@@ -123,12 +123,12 @@ gcloud secrets add-iam-policy-binding sigap-db-url \
 
 ---
 
-## ⚙️ Langkah 4: Build & Deploy Backend (FastAPI)
+## ⚙️ Step 4: Build & Deploy Backend (FastAPI)
 
-Backend SIGAP menggunakan Python 3.11 dengan pustaka geospasial (`geopandas`, `shapely`, `pyproj`). Alokasikan minimal **2 vCPU** dan **2 GiB RAM** untuk pemrosesan geospasial.
+The SIGAP backend uses Python 3.11 with geospatial libraries (`geopandas`, `shapely`, `pyproj`). Allocate at least **2 vCPUs** and **2 GiB RAM** for geospatial processing.
 
-### 4.1 Build Image Container
-#### Otentikasi Docker ke GCP Artifact Registry
+### 4.1 Build Container Image
+#### Docker Authentication to GCP Artifact Registry
 ```bash
 gcloud auth configure-docker ${GCP_REGION}-docker.pkg.dev
 
@@ -137,17 +137,17 @@ gcloud auth print-access-token | docker login \
   --password-stdin https://${GCP_REGION}-docker.pkg.dev
 ```
 
-#### Build image secara lokal
+#### Build image locally
 ```bash
 docker build -t ${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/sigap-repo/sigap-backend:v1 .
 ```
 
-#### Push image ke Artifact Registry
+#### Push image to Artifact Registry
 ```bash
 docker push ${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/sigap-repo/sigap-backend:v1
 ```
 
-### 4.2 Deploy ke Cloud Run
+### 4.2 Deploy to Cloud Run
 
 ```bash
 gcloud run deploy sigap-backend \
@@ -165,38 +165,38 @@ gcloud run deploy sigap-backend \
   --add-cloudsql-instances=project-bb622a67-c523-4912-9f6:asia-southeast2:sigap
 ```
 
-> **Catatan Mode Database**:
-> - `SKIP_DB=true`: Backend berjalan menggunakan file cache JSON bawaan (cocok untuk demo instan tanpa biaya database Cloud SQL).
-> - Jika menghubungkan ke Cloud SQL Postgres, ubah `SKIP_DB=false`, set environment `DATABASE_URL`, dan tambahkan flag `--add-cloudsql-instances`.
+> **Database Mode Note**:
+> - `SKIP_DB=true`: Backend runs using built-in JSON cache files (suitable for instant demos without Cloud SQL database costs).
+> - If connecting to Cloud SQL Postgres, change `SKIP_DB=false`, set the `DATABASE_URL` environment variable, and add the `--add-cloudsql-instances` flag.
 
-Simpan URL backend yang dihasilkan (misal: `https://sigap-backend-xyz-as.a.run.app`).
+Save the generated backend URL (e.g., `https://sigap-backend-xyz-as.a.run.app`).
 
 ---
 
-## 🎨 Langkah 5: Build & Deploy Frontend (React + Vite + Nginx)
+## 🎨 Step 5: Build & Deploy Frontend (React + Vite + Nginx)
 
-Frontend SIGAP di-bundle dan disajikan menggunakan Nginx Alpine. Nginx telah dikonfigurasi untuk mem-proxy request `/api/*` langsung ke URL backend.
+The SIGAP frontend is bundled and served using Nginx Alpine. Nginx is configured to proxy `/api/*` requests directly to the backend URL.
 
-### 5.1 Tentukan Target Backend URL
+### 5.1 Set Target Backend URL
 
 ```bash
 export BACKEND_URL=$(gcloud run services describe sigap-backend --platform managed --region $GCP_REGION --format='value(status.url)')
 echo "Target Backend URL: $BACKEND_URL"
 ```
 
-### 5.2 Build Image Frontend
+### 5.2 Build Frontend Image
 
-#### Build image secara lokal
+#### Build image locally
 ```bash
 docker build -t ${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/sigap-repo/sigap-frontend:v1 .
 ```
 
-#### Push image ke Artifact Registry
+#### Push image to Artifact Registry
 ```bash
 docker push ${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/sigap-repo/sigap-frontend:v1
 ```
 
-### 5.3 Deploy Frontend ke Cloud Run
+### 5.3 Deploy Frontend to Cloud Run
 
 ```bash
 gcloud run deploy sigap-frontend \
@@ -211,16 +211,16 @@ gcloud run deploy sigap-frontend \
   --set-env-vars="BACKEND_URL=${BACKEND_URL}"
 ```
 
-Salin URL frontend yang dihasilkan (misal: `https://sigap-frontend-xyz-as.a.run.app`).
+Copy the generated frontend URL (e.g., `https://sigap-frontend-xyz-as.a.run.app`).
 
 ---
 
-## ✅ Langkah 6: Verifikasi & Testing
+## ✅ Step 6: Verification & Testing
 
-### 1. Uji Health Check Backend
+### 1. Test Backend Health Check
 ```bash
 curl -s $BACKEND_URL/ | jq .
-# Respon yang diharapkan:
+# Expected response:
 # {
 #   "status": "ok",
 #   "timestamp": "2026-...",
@@ -229,24 +229,24 @@ curl -s $BACKEND_URL/ | jq .
 # }
 ```
 
-### 2. Uji Dokumentasi API Swagger
-Buka browser dan akses:
+### 2. Test Swagger API Documentation
+Open your browser and navigate to:
 ```
 https://sigap-backend-xyz-as.a.run.app/docs
 ```
 
-### 3. Akses Dashboard Frontend
-Buka URL frontend di browser:
+### 3. Access Frontend Dashboard
+Open the frontend URL in your browser:
 ```
 https://sigap-frontend-xyz-as.a.run.app
 ```
-Seluruh peta Leaflet, scoring kerentanan, data BMKG, dan narasi Gemini AI kini aktif di Google Cloud!
+All Leaflet maps, vulnerability scoring, BMKG data, and Gemini AI narratives are now live on Google Cloud!
 
 ---
 
-## 🔄 Langkah 7 (Opsional): Setup Auto-Refresh Baseline dengan Cloud Scheduler
+## 🔄 Step 7 (Optional): Setup Baseline Auto-Refresh with Cloud Scheduler
 
-InaRisk baseline di-cache di sistem. Untuk memperbarui baseline setiap minggu secara otomatis:
+InaRisk baselines are cached in the system. To automatically refresh the baseline every week:
 
 ```bash
 REFRESH_TOKEN_VAL=$(gcloud secrets versions access latest --secret="sigap-refresh-token")
@@ -256,7 +256,7 @@ gcloud scheduler jobs create http sigap-refresh-baselines \
   --uri="${BACKEND_URL}/internal/refresh-baselines?limit=50&token=${REFRESH_TOKEN_VAL}" \
   --http-method=POST \
   --time-zone="Asia/Jakarta" \
-  --description="Refresh data baseline InaRisk setiap Senin jam 02:00 WIB" \
+  --description="Refresh InaRisk baseline data every Monday at 02:00 WIB" \
   --location="asia-southeast2"
 ```
 
@@ -264,16 +264,16 @@ gcloud scheduler jobs create http sigap-refresh-baselines \
 
 ## 🛠️ Monitoring & Troubleshooting
 
-### Melihat Logs Cloud Run
+### Viewing Cloud Run Logs
 ```bash
-# Log backend real-time
+# Real-time backend logs
 gcloud run services logs tail sigap-backend --region $GCP_REGION
 
-# Log frontend real-time
+# Real-time frontend logs
 gcloud run services logs tail sigap-frontend --region $GCP_REGION
 ```
 
-### Update Kode & Re-deploy
-Jika ada perubahan kode:
-1. Re-run `gcloud builds submit` untuk membuat image baru.
-2. Re-run `gcloud run deploy --image ...` untuk deploy revisi terbaru tanpa downtime (*zero downtime deployment*).
+### Code Updates & Re-deployment
+If there are code changes:
+1. Re-run `docker build` and `docker push` (or `gcloud builds submit`) to create a new image.
+2. Re-run `gcloud run deploy --image ...` to deploy the latest revision with zero downtime (*zero downtime deployment*).

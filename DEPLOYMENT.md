@@ -253,10 +253,11 @@ REFRESH_TOKEN_VAL=$(gcloud secrets versions access latest --secret="sigap-refres
 
 gcloud scheduler jobs create http sigap-refresh-baselines \
   --schedule="0 2 * * 1" \
-  --uri="${BACKEND_URL}/internal/refresh-baselines?limit=5&token=${REFRESH_TOKEN_VAL}" \
+  --uri="${BACKEND_URL}/internal/refresh-baselines?limit=50&token=${REFRESH_TOKEN_VAL}" \
   --http-method=POST \
   --time-zone="Asia/Jakarta" \
-  --description="Refresh data baseline InaRisk setiap Senin jam 02:00 WIB"
+  --description="Refresh data baseline InaRisk setiap Senin jam 02:00 WIB" \
+  --location="asia-southeast2"
 ```
 
 ---

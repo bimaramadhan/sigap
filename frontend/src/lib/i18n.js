@@ -222,6 +222,8 @@ export const STRINGS = {
       loadingVuln: 'Memuat peta kerentanan...',
       loadingPoly: 'Memuat polygon InaRisk...',
       kecamatan:   'kecamatan',
+      fieldReport: 'Laporan lapangan',
+      fieldDetail: '{desa} · {level} (+{boost})',
     },
     reportPage: {
       title:       'Laporan & Briefing Situasi Banjir',
@@ -460,6 +462,8 @@ export const STRINGS = {
       loadingVuln: 'Loading vulnerability map...',
       loadingPoly: 'Loading InaRisk polygons...',
       kecamatan:   'districts',
+      fieldReport: 'Field report',
+      fieldDetail: '{desa} · {level} (+{boost})',
     },
     reportPage: {
       title:       'Flood Situation Report & Briefing',

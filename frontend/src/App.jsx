@@ -78,6 +78,7 @@ export default function App() {
   const [cityMeta, setCityMeta] = useState(MOCK_CITIES[0])
   const [activeTab, setActiveTab] = useState('map')
   const [toast, setToast] = useState(null)
+  const [mapEpoch, setMapEpoch] = useState(0)
   const { theme } = useTheme()
   const { t, fmtNum, lang: uiLang } = useLanguage()
   const isDark = theme === 'dark'
@@ -150,8 +151,14 @@ export default function App() {
     = useAnalysis(activeCity, uiLang)
 
   // ── Flood reports hook ─────────────────────────────────────────────────────
+  const handleRefresh = useCallback(() => {
+    setMapEpoch(n => n + 1)
+    refresh()
+  }, [refresh])
+
   const onReportSuccess = useCallback(() => {
     showToast(t('toast.reportSent'), 'success')
+    setMapEpoch(n => n + 1)
     // Delay sedikit supaya backend sempat proses sebelum refresh
     setTimeout(() => refresh(), 300)
   }, [refresh])
@@ -189,7 +196,7 @@ export default function App() {
         selectedCity={selectedCity}
         cities={cities}
         onCityChange={handleCityChange}
-        onRefresh={refresh}
+        onRefresh={handleRefresh}
         isLoading={isLoading}
         lastUpdated={lastUpdated}
         isLive={!USE_MOCK}
@@ -275,7 +282,12 @@ export default function App() {
               activeTab !== 'map' && 'hidden lg:flex'
             )}>
               <div className="flex-1 p-3" style={{ minHeight: 0, height: 0 }}>
-                <MapView selectedCity={selectedCity} cityName={cityName} cityMeta={cityMeta} />
+                <MapView
+                  selectedCity={selectedCity}
+                  cityName={cityName}
+                  cityMeta={cityMeta}
+                  refreshEpoch={mapEpoch}
+                />
               </div>
 
               {/* Status strip */}

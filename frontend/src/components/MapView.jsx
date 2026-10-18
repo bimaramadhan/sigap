@@ -35,6 +35,19 @@ const TILES = {
   light: { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' },
 }
 
+const LEVEL_LABEL = {
+  normal:  'flood.lvlNormal',
+  waspada: 'flood.lvlWaspada',
+  siaga:   'flood.lvlSiaga',
+  awas:    'flood.lvlAwas',
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[ch]))
+}
+
 const MOCK_STYLE = {
   high:   { color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.30, weight: 2 },
   medium: { color: '#f97316', fillColor: '#f97316', fillOpacity: 0.22, weight: 1.5 },
@@ -66,10 +79,13 @@ function FitToData({ geojson, city, cityBbox }) {
     if (cfg) map.flyTo(cfg.center, cfg.zoom, { duration: 0.9 })
   }, [city, cityBbox]) // eslint-disable-line
 
-  // Effect 2: Saat geojson kecamatan tersedia → fit ke bounds polygon
+  // Effect 2: Saat polygon kota ini pertama kali tersedia → fit ke bounds.
+  // Pembaruan skor setelah laporan tidak menggeser kamera.
+  const fittedCity = useRef(null)
   useEffect(() => {
     const feats = geojson?.features ?? []
     if (feats.length === 0) return
+    if (fittedCity.current === city) return
 
     let minLat = 90, minLng = 180, maxLat = -90, maxLng = -180
     const scan = (coords) => {
@@ -88,12 +104,13 @@ function FitToData({ geojson, city, cityBbox }) {
     for (const f of feats) scan(f.geometry?.coordinates ?? [])
 
     if (minLat <= maxLat && minLng <= maxLng) {
+      fittedCity.current = city
       map.flyToBounds(
         [[minLat, minLng], [maxLat, maxLng]],
         { duration: 1.0, padding: [20, 20] }
       )
     }
-  }, [geojson]) // eslint-disable-line
+  }, [geojson, city]) // eslint-disable-line
 
   return null
 }
@@ -175,6 +192,19 @@ function KecamatanPanel({ kec, isDark, onClose }) {
         </div>
       ))}
 
+      {kec.field_desa && (
+        <div style={{ marginTop: 2 }}>
+          <p style={{ color: sub, fontSize: 11, margin: '0 0 2px' }}>{t('map.fieldReport')}</p>
+          <p style={{ color: txt, fontSize: 12, fontWeight: 600, margin: 0 }}>
+            {t('map.fieldDetail', {
+              desa: kec.field_desa,
+              level: t(LEVEL_LABEL[kec.field_level] ?? 'flood.lvlNormal'),
+              boost: kec.field_boost ?? 0,
+            })}
+          </p>
+        </div>
+      )}
+
       {/* Alert banner */}
       {(isAwas || isSiaga) && (
         <div style={{
@@ -202,7 +232,14 @@ function LiveVulnLayer({ geojson, isDark, onKecamatanClick }) {
   const styleFeature = useCallback((feature) => {
     // Gunakan vuln_color kalau ada, fallback ke color (hazard-based)
     const color = feature?.properties?.vuln_color ?? feature?.properties?.color ?? '#f97316'
-    return { color, fillColor: color, fillOpacity: 0.35, weight: 1.5, opacity: 0.9 }
+    const reported = (feature?.properties?.field_boost ?? 0) > 0
+    return {
+      color,
+      fillColor: color,
+      fillOpacity: reported ? 0.55 : 0.35,
+      weight: reported ? 2.5 : 1.5,
+      opacity: 0.9,
+    }
   }, [])
 
   const onEachFeature = useCallback((feature, layer) => {
@@ -220,10 +257,18 @@ function LiveVulnLayer({ geojson, isDark, onKecamatanClick }) {
       : (p.vuln_score ?? 0) >= 25 ? '#ca8a04'
       : '#16a34a'
 
+    const fieldLine = p.field_desa
+      ? `<p style="margin:4px 0 0;font-size:11px;font-weight:600">${escapeHtml(t('map.fieldReport'))}: ${escapeHtml(t('map.fieldDetail', {
+          desa: p.field_desa,
+          level: t(LEVEL_LABEL[p.field_level] ?? 'flood.lvlNormal'),
+          boost: p.field_boost ?? 0,
+        }))}</p>`
+      : ''
     tooltipEl.innerHTML = `
-      <p style="font-weight:700;margin:0 0 4px">${p.name}</p>
-      <p style="color:${scoreColor};font-weight:600;margin:0 0 2px">${p.vuln_category ?? ''} &nbsp; <b>${p.vuln_score ?? '-'}</b>/100</p>
+      <p style="font-weight:700;margin:0 0 4px">${escapeHtml(p.name)}</p>
+      <p style="color:${scoreColor};font-weight:600;margin:0 0 2px">${escapeHtml(p.vuln_category ?? '')} &nbsp; <b>${p.vuln_score ?? '-'}</b>/100</p>
       <p style="opacity:.65;font-size:11px;margin:0">${t('map.hazardTooltip')}${p.hazard?.toFixed(3) ?? 'N/A'} &bull; ${t('map.clickDetail')}</p>
+      ${fieldLine}
     `
     layer.bindTooltip(tooltipEl, { sticky: true, className: 'inarisk-tooltip' })
 
@@ -327,7 +372,7 @@ function MapLegend({ isDark, isLive }) {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 // cityMeta: objek kota aktif dari App.jsx, berisi { id, label, bbox, ... }
-export default function MapView({ selectedCity, cityName, cityMeta }) {
+export default function MapView({ selectedCity, cityName, cityMeta, refreshEpoch = 0 }) {
   const { theme }   = useTheme()
   const { t }       = useLanguage()
   const isDark      = theme === 'dark'
@@ -343,17 +388,27 @@ export default function MapView({ selectedCity, cityName, cityMeta }) {
   // Fallback: flood polygon biasa (hazard-colored)
   const { polygons: floodPolygons, loading: fallbackLoading } = useFloodPolygons(selectedCity)
 
+  // Ganti kota mengosongkan peta lama. Laporan baru hanya memuat ulang skor.
+  useEffect(() => {
+    setSelectedKec(null)
+    setVulnMap(null)
+  }, [selectedCity])
+
+  useEffect(() => {
+    if (!vulnMap?.features || !selectedKec) return
+    const match = vulnMap.features.find(f => f.properties?.name === selectedKec.name)
+    if (match) setSelectedKec(match.properties)
+  }, [vulnMap]) // eslint-disable-line
+
   // Fetch vulnerability map per kota, dengan retry jika polygon belum tersedia
   useEffect(() => {
     if (!selectedCity) return
-    setSelectedKec(null)
-    setVulnMap(null)
-    setVulnLoading(true)
 
     let cancelled = false
     let retryCount = 0
     const MAX_RETRIES = 5
     const RETRY_INTERVAL = 5000 // 5 detik
+    setVulnLoading(true)
 
     const fetchVulnMap = () => {
       getVulnerabilityMap(selectedCity)
@@ -363,7 +418,6 @@ export default function MapView({ selectedCity, cityName, cityMeta }) {
             setVulnMap(data)
             setVulnLoading(false)
           } else if (retryCount < MAX_RETRIES) {
-            // Polygon belum ada di backend, coba lagi setelah interval
             retryCount++
             setTimeout(fetchVulnMap, RETRY_INTERVAL)
           } else {
@@ -377,7 +431,7 @@ export default function MapView({ selectedCity, cityName, cityMeta }) {
 
     fetchVulnMap()
     return () => { cancelled = true }
-  }, [selectedCity])
+  }, [selectedCity, refreshEpoch])
 
   // Gunakan vulnMap kalau ada, fallback ke floodPolygons, fallback ke mock
   const activeGeojson  = vulnMap ?? floodPolygons

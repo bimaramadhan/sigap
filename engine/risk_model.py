@@ -108,6 +108,22 @@ def _trigger_multiplier(weather_boost: float, alert_boost: float, field_boost: f
     }
 
 
+def field_lift(weather_boost: float, alert_boost: float, field_boost: float) -> float:
+    """
+    Rasio skor dengan laporan lapangan dibanding tanpa laporan.
+
+    Memakai kurva saturasi yang sama dengan gauge kota. Laporan 0 mengembalikan
+    1.0, jadi kecamatan tanpa laporan tidak berubah.
+    """
+    if not field_boost or field_boost <= 0:
+        return 1.0
+    base = _trigger_multiplier(weather_boost, alert_boost, 0.0)["multiplier"]
+    boosted = _trigger_multiplier(weather_boost, alert_boost, field_boost)["multiplier"]
+    if base <= 0:
+        return 1.0
+    return boosted / base
+
+
 # ── Orkestrasi 3 lapis ────────────────────────────────────────────────────────
 def compute_advanced_score(result, features: dict, record_history: bool = True) -> dict:
     """

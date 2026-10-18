@@ -22,6 +22,7 @@ def score_city(
     include_weather: bool = True,
     include_alerts: bool = True,
     include_field: bool = True,
+    record_history: bool = True,
 ):
     """
     Return (VulnerabilityResult, weather_dict, alert_list).
@@ -73,7 +74,7 @@ def score_city(
     # ── Model risiko 3-lapis (UNDRR structural × saturasi × momentum) ────────
     # Menggantikan penjumlahan linear lama (base + boost) yang bisa "mentok 100".
     from engine.risk_model import compute_advanced_score
-    adv = compute_advanced_score(result, features, record_history=True)
+    adv = compute_advanced_score(result, features, record_history=record_history)
 
     result.score              = adv["final_score"]
     result.structural_score   = adv["structural_score"]

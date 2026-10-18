@@ -702,46 +702,36 @@ def get_flood_polygons(city: str, force: bool = Query(False)):
 
 # ── Vulnerability Map (per-kecamatan) ─────────────────────────────────────────
 
+def _norm_kecamatan(name: str) -> str:
+    return " ".join((name or "").split()).casefold()
+
+
 @app.get("/vulnerability-map/{city}", tags=["Map Data"])
 def get_vulnerability_map(city: str):
     """
     GeoJSON polygon kecamatan dengan vulnerability score per kecamatan.
-    Response di-cache 10 menit agar cepat dan tidak timeout di frontend.
+
+    Bentuk polygon dibaca dari baseline di database. Laporan lapangan 12 jam
+    terakhir ditempel saat request, jadi kecamatan yang punya laporan langsung
+    berubah skor dan warnanya.
     """
     city = _validate_city(city)
-
-    # ── Cache check (10 menit) ────────────────────────────────────────────────
-    import hashlib, time
-    from pathlib import Path
-    _cache_dir = Path("data/cache")
-    _cache_file = _cache_dir / f"vuln_map_{city}.json"
-    _CACHE_TTL = 600  # 10 menit
-
-    if _cache_file.exists():
-        age = time.time() - _cache_file.stat().st_mtime
-        if age < _CACHE_TTL:
-            import json as _json
-            with open(_cache_file, encoding="utf-8") as f:
-                cached = _json.load(f)
-            # Hanya pakai cache jika memang ada features di dalamnya
-            if cached.get("features"):
-                logger.debug(f"  vuln_map cache hit: {city} (age {age:.0f}s)")
-                return cached
-            else:
-                logger.debug(f"  vuln_map cache miss (kosong): {city}, re-compute")
 
     try:
         from engine.scoring       import score_city
         from engine.baseline      import get_polygons as _get_polygons
+        from engine.flood_report  import get_kecamatan_boosts
+        from engine.risk_model    import field_lift
         from engine.vulnerability import WEIGHTS, NORM, SCORE_CATEGORIES
 
-        # ── 1. Ambil city-level vulnerability (dengan semua boosts) ───────────
-        # Pakai score_city (jalur baru, paham kode wilayah 33.74)
+        # Basis peta tanpa laporan lapangan. Laporan ditempel per kecamatan
+        # di bawah, supaya kecamatan lain tidak ikut naik.
         city_result, _, _ = score_city(
             city,
             include_weather=True,
             include_alerts=True,
-            include_field=True,
+            include_field=False,
+            record_history=False,
         )
 
         city_base         = city_result.score - city_result.weather_boost - city_result.alert_boost
@@ -777,11 +767,25 @@ def get_vulnerability_map(city: str):
         n_features    = len(polygons.get("features", []))
         pop_per_kec   = round(city_pop / n_features) if n_features > 0 else 0
 
+        boosts = get_kecamatan_boosts(city)
+        boosts_by_name = {_norm_kecamatan(name): info for name, info in boosts.items()}
+        polygon_names = {
+            _norm_kecamatan((feat.get("properties") or {}).get("name", ""))
+            for feat in polygons.get("features", [])
+        }
+        unmatched = [name for name in boosts if _norm_kecamatan(name) not in polygon_names]
+        if unmatched:
+            logger.warning(f"  Laporan kecamatan tidak cocok dengan polygon {city}: {unmatched}")
+
         enriched_features = []
         for feat in polygons.get("features", []):
             props      = dict(feat.get("properties", {}))
             hazard_val = props.get("hazard", 0.0)
-            vs         = _kec_score(hazard_val)
+            base_vs    = _kec_score(hazard_val)
+            report     = boosts_by_name.get(_norm_kecamatan(props.get("name", "")))
+            field_pts  = float(report["boost_score"]) if report else 0.0
+            lift       = field_lift(weather_boost, alert_boost, field_pts)
+            vs         = round(min(100.0, max(0.0, base_vs * lift)), 1)
             cat, _     = _kec_category(vs)
 
             # Estimasi populasi terdampak proporsional dengan hazard
@@ -792,6 +796,10 @@ def get_vulnerability_map(city: str):
             props["vuln_category"]  = cat
             props["vuln_color"]     = VULN_COLORS.get(cat, "#6b7280")
             props["population_est"] = pop_est
+            props["field_boost"]    = field_pts
+            props["field_level"]    = report["flood_level"] if report else ""
+            props["field_desa"]     = report["desa_name"] if report else ""
+            props["field_reason"]   = report["reason"] if report else ""
 
             enriched_features.append({
                 "type":       feat["type"],
@@ -815,13 +823,6 @@ def get_vulnerability_map(city: str):
             "_source":  "InaRisk BNPB + SIGAP vulnerability engine",
             "_generated_at": datetime.now(timezone.utc).isoformat(),
         }
-
-        # ── Simpan ke cache ───────────────────────────────────────────────────
-        import json as _json
-        _cache_dir.mkdir(parents=True, exist_ok=True)
-        with open(_cache_file, "w", encoding="utf-8") as f:
-            _json.dump(result, f, ensure_ascii=False)
-
         return result
 
     except Exception as e:

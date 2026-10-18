@@ -54,62 +54,75 @@ const MOCK_STYLE = {
   low:    { color: '#eab308', fillColor: '#eab308', fillOpacity: 0.15, weight: 1 },
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
-// Pindah kamera ke bounds polygon yang di-fetch (dinamis — jalan untuk kota manapun).
-// Fallback ke CITY_CENTERS statis kalau polygon belum ada.
-// cityBbox format: [minLng, minLat, maxLng, maxLat] (format WGS84 standar dari backend)
-function FitToData({ geojson, city, cityBbox }) {
-  const map = useMap()
+function belongsToCity(geojson, city) {
+  const owner = geojson?.city
+  if (!owner || !city || !geojson?.features?.length) return false
+  if (owner === city) return true
+  const alias = CITY_ID_TO_KEY[city]
+  if (alias && owner === alias) return true
+  return CITY_ID_TO_KEY[owner] === city
+}
 
-  // Effect 1: Saat kota berubah → langsung fly menggunakan bbox dari database
-  // Ini mencakup SEMUA kota (bukan hanya 4 kota hardcoded)
-  useEffect(() => {
-    // Prioritas 1: bbox dari database (paling akurat, covers semua kota)
-    if (Array.isArray(cityBbox) && cityBbox.length === 4) {
-      const [minLng, minLat, maxLng, maxLat] = cityBbox
-      map.flyToBounds(
-        [[minLat, minLng], [maxLat, maxLng]],
-        { duration: 0.9, padding: [30, 30] }
-      )
-      return
-    }
-    // Prioritas 2: fallback ke CITY_CENTERS statis (hanya 4 kota)
-    const key = CITY_ID_TO_KEY[city] ?? city
-    const cfg = CITY_CENTERS[key]
-    if (cfg) map.flyTo(cfg.center, cfg.zoom, { duration: 0.9 })
-  }, [city, cityBbox]) // eslint-disable-line
-
-  // Effect 2: Saat polygon kota ini pertama kali tersedia → fit ke bounds.
-  // Pembaruan skor setelah laporan tidak menggeser kamera.
-  const fittedCity = useRef(null)
-  useEffect(() => {
-    const feats = geojson?.features ?? []
-    if (feats.length === 0) return
-    if (fittedCity.current === city) return
-
-    let minLat = 90, minLng = 180, maxLat = -90, maxLng = -180
-    const scan = (coords) => {
-      for (const c of coords) {
-        if (typeof c[0] === 'number' && typeof c[1] === 'number') {
-          const [lng, lat] = c
-          if (lat < minLat) minLat = lat
-          if (lat > maxLat) maxLat = lat
-          if (lng < minLng) minLng = lng
-          if (lng > maxLng) maxLng = lng
-        } else {
-          scan(c) // nested (Polygon/MultiPolygon rings)
-        }
+function boundsOf(geojson) {
+  let minLat = 90, minLng = 180, maxLat = -90, maxLng = -180
+  let found = false
+  const scan = (coords) => {
+    for (const c of coords) {
+      if (typeof c?.[0] === 'number' && typeof c?.[1] === 'number') {
+        const [lng, lat] = c
+        if (lat < minLat) minLat = lat
+        if (lat > maxLat) maxLat = lat
+        if (lng < minLng) minLng = lng
+        if (lng > maxLng) maxLng = lng
+        found = true
+      } else if (Array.isArray(c)) {
+        scan(c)
       }
     }
-    for (const f of feats) scan(f.geometry?.coordinates ?? [])
+  }
+  for (const feature of geojson?.features ?? []) scan(feature.geometry?.coordinates ?? [])
+  if (!found || minLat > maxLat || minLng > maxLng) return null
+  return [[minLat, minLng], [maxLat, maxLng]]
+}
 
-    if (minLat <= maxLat && minLng <= maxLng) {
-      fittedCity.current = city
-      map.flyToBounds(
-        [[minLat, minLng], [maxLat, maxLng]],
-        { duration: 1.0, padding: [20, 20] }
-      )
+// ── Sub-components ────────────────────────────────────────────────────────────
+// Klik kota langsung memindahkan kamera ke bbox kota itu.
+// Polygon kota lain tidak boleh membatalkan perpindahan itu.
+// cityBbox format: [minLng, minLat, maxLng, maxLat]
+function FitToData({ geojson, city, cityBbox, cityLat, cityLng }) {
+  const map = useMap()
+  const polygonFitted = useRef(null)
+
+  useEffect(() => {
+    if (polygonFitted.current === city) return
+    map.stop()
+    if (Array.isArray(cityBbox) && cityBbox.length === 4) {
+      const [minLng, minLat, maxLng, maxLat] = cityBbox.map(Number)
+      if ([minLng, minLat, maxLng, maxLat].every(Number.isFinite) && maxLng > minLng && maxLat > minLat) {
+        map.flyToBounds([[minLat, minLng], [maxLat, maxLng]], { duration: 0.45, padding: [30, 30] })
+        return
+      }
     }
+    const lat = Number(cityLat)
+    const lng = Number(cityLng)
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      map.flyTo([lat, lng], 11, { duration: 0.45 })
+      return
+    }
+    const cfg = CITY_CENTERS[CITY_ID_TO_KEY[city] ?? city]
+    if (cfg) map.flyTo(cfg.center, cfg.zoom, { duration: 0.45 })
+  }, [city, cityBbox, cityLat, cityLng]) // eslint-disable-line
+
+  // Polygon yang cocok dengan kota ini mengunci kamera.
+  // Pembaruan skor laporan tidak menggeser peta lagi.
+  useEffect(() => {
+    if (!belongsToCity(geojson, city)) return
+    if (polygonFitted.current === city) return
+    const bounds = boundsOf(geojson)
+    if (!bounds) return
+    polygonFitted.current = city
+    map.stop()
+    map.flyToBounds(bounds, { duration: 0.45, padding: [20, 20] })
   }, [geojson, city]) // eslint-disable-line
 
   return null
@@ -384,42 +397,52 @@ export default function MapView({ selectedCity, cityName, cityMeta, refreshEpoch
   const [vulnMap,      setVulnMap]      = useState(null)
   const [vulnLoading,  setVulnLoading]  = useState(false)
   const [selectedKec,  setSelectedKec]  = useState(null)
+  const mapCache = useRef(new Map())
 
   // Fallback: flood polygon biasa (hazard-colored)
   const { polygons: floodPolygons, loading: fallbackLoading } = useFloodPolygons(selectedCity)
 
-  // Ganti kota mengosongkan peta lama. Laporan baru hanya memuat ulang skor.
+  const remembered = mapCache.current.get(selectedCity)
+  const liveVuln = belongsToCity(vulnMap, selectedCity) ? vulnMap : null
+  const cachedVuln = belongsToCity(remembered, selectedCity) ? remembered : null
+  const liveFlood = belongsToCity(floodPolygons, selectedCity) ? floodPolygons : null
+  // Kota yang baru diklik tidak menampilkan polygon kota sebelumnya.
+  const activeGeojson = liveVuln ?? cachedVuln ?? liveFlood
+
   useEffect(() => {
     setSelectedKec(null)
-    setVulnMap(null)
   }, [selectedCity])
 
   useEffect(() => {
-    if (!vulnMap?.features || !selectedKec) return
+    if (!belongsToCity(vulnMap, selectedCity) || !selectedKec) return
     const match = vulnMap.features.find(f => f.properties?.name === selectedKec.name)
     if (match) setSelectedKec(match.properties)
-  }, [vulnMap]) // eslint-disable-line
+  }, [vulnMap, selectedCity]) // eslint-disable-line
 
-  // Fetch vulnerability map per kota, dengan retry jika polygon belum tersedia
+  // Fetch vulnerability map per kota, dengan retry jika polygon belum tersedia.
+  // Respons kota lain diabaikan kalau pengguna sudah pindah.
   useEffect(() => {
     if (!selectedCity) return
 
     let cancelled = false
     let retryCount = 0
+    let retryTimer = 0
     const MAX_RETRIES = 5
-    const RETRY_INTERVAL = 5000 // 5 detik
+    const RETRY_INTERVAL = 5000
+    const requested = selectedCity
     setVulnLoading(true)
 
     const fetchVulnMap = () => {
-      getVulnerabilityMap(selectedCity)
+      getVulnerabilityMap(requested)
         .then(data => {
           if (cancelled) return
-          if (data && data.features && data.features.length > 0) {
+          if (belongsToCity(data, requested)) {
+            mapCache.current.set(requested, data)
             setVulnMap(data)
             setVulnLoading(false)
           } else if (retryCount < MAX_RETRIES) {
             retryCount++
-            setTimeout(fetchVulnMap, RETRY_INTERVAL)
+            retryTimer = window.setTimeout(fetchVulnMap, RETRY_INTERVAL)
           } else {
             setVulnLoading(false)
           }
@@ -430,14 +453,15 @@ export default function MapView({ selectedCity, cityName, cityMeta, refreshEpoch
     }
 
     fetchVulnMap()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      window.clearTimeout(retryTimer)
+    }
   }, [selectedCity, refreshEpoch])
 
-  // Gunakan vulnMap kalau ada, fallback ke floodPolygons, fallback ke mock
-  const activeGeojson  = vulnMap ?? floodPolygons
   const hasLive        = activeGeojson && activeGeojson.features?.length > 0
   const isLoading      = vulnLoading || fallbackLoading
-  const isVulnMode     = !!vulnMap
+  const isVulnMode     = !!(liveVuln || cachedVuln)
 
   // Bbox dari cityMeta (didapat dari database via getCity)
   const cityBbox = cityMeta?.bbox ?? null
@@ -455,7 +479,13 @@ export default function MapView({ selectedCity, cityName, cityMeta, refreshEpoch
         }}
       >
         <ThemeTileLayer />
-        <FitToData geojson={activeGeojson} city={selectedCity} cityBbox={cityBbox} />
+        <FitToData
+          geojson={activeGeojson}
+          city={selectedCity}
+          cityBbox={cityMeta?.id === selectedCity ? cityBbox : null}
+          cityLat={cityMeta?.id === selectedCity ? cityMeta?.lat : null}
+          cityLng={cityMeta?.id === selectedCity ? cityMeta?.lng : null}
+        />
         <ZoomControl position="bottomright" />
 
         {hasLive
